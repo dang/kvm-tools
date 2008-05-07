@@ -1,0 +1,78 @@
+#!/bin/bash
+#
+# Script to run kvm
+#
+
+#
+# This will source a file in ${HOME}/.config/kvm-run, and in the current
+# directory called kvm-run.conf in that order.  These files set up account-wide
+# defaults, and settings for the current kvm to run, including things like
+# networks and drives.
+
+RCFILE="${HOME}/.config/kvm-run"
+CONFFILE="${PWD}/kvm-run.conf"
+
+# Set usage output
+USAGE="[-h |--help]"
+LONGUSAGE="\t-h, --help\n\t\tPrint this help message"
+
+# Standard functions
+source ${HOME}/.scripts/functions.sh
+
+# Script name
+ME=$(basename $0)
+
+# Parse arguments
+ARGS=`getopt -o h --long help -n "${ME}" -- "$@"`
+
+if [ $? != 0 ] ; then
+	usage 
+fi
+eval set -- "$ARGS"
+
+while true ; do
+	case "$1" in
+		-h|--help) usage; shift ;;
+		--) shift ; break ;;
+		* ) usage "Invalid argument $1";;
+	esac
+done
+
+# We want parameters for run
+shift 2
+
+# Set up defaults
+NETNUM=1
+NETTYPE=system-vde
+IMGFILE=kvm.img
+MEMORY=512
+CDROM=
+BOOT=
+
+if [ -f ${RCFILE} ]; then
+	echo "sourcing ${RCFILE}"
+	source ${RCFILE}
+fi
+
+if [ -f ${CONFFILE} ]; then
+	echo "sourcing ${CONFFILE}"
+	source ${CONFFILE}
+fi
+
+if [ ! -f "${IMGFILE}" ]; then
+	die "No image file ${IMGFILE} found"
+fi
+
+case "${NETTYPE}" in
+	system-vde)
+		CMD="vdeq kvm -sock /var/run/vde.ctl/ctl -net nic -net vde"
+		;;
+	none)
+		CMD="kvm"
+		;;
+	*)
+		die "Unknown NETTYPE ${NETTYPE}"
+		;;
+esac
+
+${CMD} -hda ${IMGFILE} -m ${MEMORY} ${CDROM} ${BOOT}
