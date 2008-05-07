@@ -44,10 +44,12 @@ shift 2
 # Set up defaults
 NETNUM=1
 NETTYPE=system-vde
+NICMODEL=
 IMGFILE=kvm.img
 MEMORY=512
 CDROM=
 BOOT=
+NOGRAPHIC=
 
 if [ -f ${RCFILE} ]; then
 	echo "sourcing ${RCFILE}"
@@ -65,7 +67,7 @@ fi
 
 case "${NETTYPE}" in
 	system-vde)
-		CMD="vdeq kvm -sock /var/run/vde.ctl/ctl -net nic -net vde"
+		CMD="vdeq kvm -sock /var/run/vde.ctl/ctl -net nic${NICMODEL} -net vde ${NOGRAPHIC}"
 		;;
 	none)
 		CMD="kvm"
