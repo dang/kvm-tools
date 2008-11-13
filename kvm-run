@@ -50,6 +50,9 @@ MEMORY=512
 CDROM=
 BOOT=
 NOGRAPHIC=
+VIRTIO=
+MOUSE="-usb -usbdevice tablet"
+SOUND=
 
 if [ -f ${RCFILE} ]; then
 	echo "sourcing ${RCFILE}"
@@ -65,9 +68,15 @@ if [ ! -f "${IMGFILE}" ]; then
 	die "No image file ${IMGFILE} found"
 fi
 
+if [ -n "${VIRTIO}" ]; then
+	DISKCMD="-drive file=${IMGFILE},if=virtio,boot=on"
+else
+	DISKCMD="-hda ${IMGFILE} "
+fi
+
 case "${NETTYPE}" in
 	system-vde)
-		CMD="vdeq kvm -sock /var/run/vde.ctl/ctl -net nic${NICMODEL} -net vde ${NOGRAPHIC}"
+		CMD="kvm -net nic${NICMODEL} -net vde,sock=/var/run/vde.ctl ${NOGRAPHIC}"
 		;;
 	none)
 		CMD="kvm"
@@ -77,4 +86,4 @@ case "${NETTYPE}" in
 		;;
 esac
 
-${CMD} -hda ${IMGFILE} -m ${MEMORY} ${CDROM} ${BOOT}
+${CMD} ${DISKCMD} -m ${MEMORY} ${MOUSE} ${CDROM} ${BOOT} ${SOUND}
