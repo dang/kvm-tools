@@ -1,5 +1,9 @@
 #!/bin/bash
 #
+# Copyright 2008 by Daniel Gryniewicz <dang@gentoo.org>
+#
+# Released under the GPL version 2
+#
 # Script to run kvm
 #
 
