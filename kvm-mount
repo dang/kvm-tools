@@ -1,0 +1,60 @@
+#!/bin/bash
+#
+# Mount a raw kvm image.  Assumes it's partitioned, and the partition to mount is the last one.
+
+
+# Set usage output
+USAGE="[-h |--help] [<img-file>]"
+LONGUSAGE="\t-h, --help\n\t\tPrint this help message
+\t<img-file>\n\t\tImage file to mount (defaults to IMGFILE from kvm-run.conf)"
+
+# Standard functions
+source ${HOME}/.scripts/functions.sh
+
+# Script name
+ME=$(basename $0)
+
+# Parse arguments
+ARGS=`getopt -o h --long help -n "${ME}" -- "$@"`
+
+if [ $? != 0 ] ; then
+	usage 
+fi
+eval set -- "$ARGS"
+
+while true ; do
+	case "$1" in
+		-h|--help) usage; shift ;;
+		--) shift ; break ;;
+		* ) usage "Invalid argument $1";;
+	esac
+done
+
+# Remaining arguments are in $1, $2, etc. as normal
+
+if [ -n "${1}" ]; then
+	IMGFILE="${1}"
+elif [ ! -f kvm-run.conf ]; then
+	die "No img-file given, and no kvm-run.conf"
+else
+	source kvm-run.conf
+	# Sets IMGFILE
+fi
+
+if [ -z "${IMGFILE}" ]; then
+	die "IMGFILE empty!"
+fi
+
+if [ -z "$(file ${IMGFILE} | grep "x86 boot sector")" ]; then
+	die "${IMGFILE} is not a raw image file"
+fi
+
+STARTSECTOR=$(file ${IMGFILE} | grep -o "startsector [0-9]*" | tail -n 1 | awk '{print $2}')
+
+OFFSET=$((${STARTSECTOR} * 512))
+
+if [ ! -d mnt ]; then
+	sudo mkdir mnt
+fi
+
+sudo mount -o loop,offset=${OFFSET} ${IMGFILE} mnt/
