@@ -57,6 +57,7 @@ NOGRAPHIC=
 VIRTIO=
 MOUSE="-usb -usbdevice tablet"
 SOUND=
+SMP=
 
 if [ -f ${RCFILE} ]; then
 	echo "sourcing ${RCFILE}"
@@ -90,4 +91,4 @@ case "${NETTYPE}" in
 		;;
 esac
 
-${CMD} ${DISKCMD} -m ${MEMORY} ${MOUSE} ${CDROM} ${BOOT} ${SOUND}
+${CMD} ${DISKCMD} -m ${MEMORY} ${MOUSE} ${CDROM} ${BOOT} ${SOUND} ${SMP}
