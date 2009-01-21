@@ -51,10 +51,20 @@ fi
 
 STARTSECTOR=$(file ${IMGFILE} | grep -o "startsector [0-9]*" | tail -n 1 | awk '{print $2}')
 
-OFFSET=$((${STARTSECTOR} * 512))
+ROOTOFFSET=$((${STARTSECTOR} * 512))
 
 if [ ! -d mnt ]; then
 	sudo mkdir mnt
 fi
 
-sudo mount -o loop,offset=${OFFSET} ${IMGFILE} mnt/
+sudo mount -o loop,offset=${ROOTOFFSET} ${IMGFILE} mnt/
+
+if [ ! -d mnt/boot ]; then
+	exit
+fi
+
+STARTSECTOR=$(file ${IMGFILE} | grep -o "startsector [0-9]*" | head -n 1 | awk '{print $2}')
+
+BOOTOFFSET=$((${STARTSECTOR} * 512))
+
+sudo mount -o loop,offset=${BOOTOFFSET} ${IMGFILE} mnt/boot/
