@@ -1,5 +1,28 @@
 Scripts to make kvm easier to use, day-to-day
 
+How to use these scripts:
+
+1. Check them out (duh...)
+2. Make a directory to hold a virtual machine
+
+mkdir -p ~/virtualization/test
+
+3. Make an image for the machine
+
+kvm-img create -f raw ~/virtualization/test/test.img 20G
+
+4. Copy the kvm-run.conf and edit appropriately (setting at least IMGFILE)
+
+cp /path/to/kvm-tools/kmv-run.conf ~/virtualization/test
+vim ~/virtualization/test/kvm-run.conf
+
+5. Run kvm
+
+cd ~/virtualization/test
+/path/to/kvm-tools/kvm-run
+
+That's it.
+
 Note on bridged networks:
 
 For bridged networks to work, you must have the bridge setup ahead of time.  On
