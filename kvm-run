@@ -21,7 +21,34 @@ USAGE="[-h |--help]"
 LONGUSAGE="\t-h, --help\n\t\tPrint this help message"
 
 # Standard functions
-source ${HOME}/.scripts/functions.sh
+#source ${HOME}/.scripts/functions.sh
+die() {
+	echo "$@"
+	if [ ! -z "$(declare -F | grep "DFGcleanup")" ]; then
+		DFGcleanup "$@"
+	fi
+	exit 1
+}
+
+usage() {
+	local myusage;
+	if [ -n "${USAGE}" ]; then
+		myusage=${USAGE}
+	else
+		myusage="No usage given"
+	fi
+	if [ -n "$1" ]; then
+		echo "$@"
+	fi
+	echo ""
+	echo "Usage:"
+	echo "`basename $0` ${myusage}"
+	if [ -n "${LONGUSAGE}" ]; then
+		echo -e "${LONGUSAGE}"
+	fi
+	exit 1
+}
+
 
 # Script name
 ME=$(basename $0)
