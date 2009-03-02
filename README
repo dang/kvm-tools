@@ -1,1 +1,23 @@
 Scripts to make kvm easier to use, day-to-day
+
+Note on bridged networks:
+
+For bridged networks to work, you must have the bridge setup ahead of time.  On
+gentoo, this is dead easy.
+
+1. Emerge usermode-utilities and bridge-utils
+
+2. Set up your host configuration
+
+/etc/conf.d/net:
+
+bridge_br0="eth0"
+RC_NEED_br0="net.eth0"
+config_br0=( "dhcp" )
+config_eth0=( "null" )
+
+
+Symlink /etc/init.d/net.eth0 and /etc/init.d/net.br0 like normal.  The result
+should be br0 with a dhcp'd IP and eth0 in it.
+
+3. Set bridge mode in kvm-run.conf, optionally setting a name
