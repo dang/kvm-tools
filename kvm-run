@@ -48,6 +48,7 @@ shift 2
 # Set up defaults
 NETNUM=1
 NETTYPE=system-vde
+BRIDGETAP=btap0
 NICMODEL=
 IMGFILE=kvm.img
 MEMORY=512
@@ -85,6 +86,9 @@ case "${NETTYPE}" in
 		;;
 	none)
 		CMD="kvm"
+		;;
+	bridge)
+		CMD="kvm -net nic${NICMODEL} -net tap,ifname=${BRIDGETAP}"
 		;;
 	*)
 		die "Unknown NETTYPE ${NETTYPE}"
