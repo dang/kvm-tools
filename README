@@ -44,3 +44,28 @@ Symlink /etc/init.d/net.eth0 and /etc/init.d/net.br0 like normal.  The result
 should be br0 with a dhcp'd IP and eth0 in it.
 
 3. Set bridge mode in kvm-run.conf, optionally setting a name
+
+
+VDE NATed
+
+Enable ip forwarding:
+sudo sysctl -w net.ipv4.ip_forward=1
+(set it in /etc/sysctl.conf to get it every boot)
+
+Enable natting on all external interfaces:
+sudo iptables -t nat -A POSTROUTING -o wlan0 -j MASQUERADE
+sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+sudo /etc/init.d/iptables save
+sudo rc-update add iptables default
+
+Set up a vtap0 interfacece:
+cd /etc/init.d && sudo ln -s net.lo net.vtap0
+edit /etc/conf.d/net and add these lines:
+networkmanager_vtap0="ignore"
+tuntap_vtap0="tap"
+config_vtap0="192.168.192.254/24"
+edit /etc/conf.d/vde:
+VDE_TAP="vtap0"
+VDE_SOCK_CHMOD="770"
+VDE_SOCK_CHOWN=":kvm"
+sudo rc-update add vde default
