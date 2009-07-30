@@ -49,9 +49,9 @@ usage() {
 	exit 1
 }
 
-
 # Script name
 ME=$(basename $0)
+MYLOC=$(dirname $0)
 
 # Parse arguments
 ARGS=`getopt -o h --long help -n "${ME}" -- "$@"`
@@ -109,15 +109,22 @@ if [ -z "${DISKCMD}" ]; then
 	fi
 fi
 
+if [ -z "${NIC}" ]; then
+	if [ -z "${MAC}" ]; then
+		MAC=$(${MYLOC}/kvm-macaddr)
+	fi
+	NIC="nic${NICMODEL},macaddr=${MAC}"
+fi
+
 case "${NETTYPE}" in
 	system-vde)
-		CMD="kvm -net nic${NICMODEL} -net vde,sock=/var/run/vde.ctl"
+		CMD="kvm -net ${NIC} -net vde,sock=/var/run/vde.ctl"
 		;;
 	none)
 		CMD="kvm"
 		;;
 	bridge)
-		CMD="kvm -net nic${NICMODEL} -net tap,ifname=${BRIDGETAP}"
+		CMD="kvm -net ${NIC} -net tap,ifname=${BRIDGETAP}"
 		;;
 	*)
 		die "Unknown NETTYPE ${NETTYPE}"
