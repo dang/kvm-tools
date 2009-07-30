@@ -97,14 +97,16 @@ if [ -f ${CONFFILE} ]; then
 	source ${CONFFILE}
 fi
 
-if [ ! -f "${IMGFILE}" ]; then
-	die "No image file ${IMGFILE} found"
-fi
+if [ -z "${DISKCMD}" ]; then
+	if [ ! -f "${IMGFILE}" ]; then
+		die "No image file ${IMGFILE} found"
+	fi
 
-if [ -n "${VIRTIO}" ]; then
-	DISKCMD="-drive file=${IMGFILE},if=virtio,boot=on"
-else
-	DISKCMD="-hda ${IMGFILE} "
+	if [ -n "${VIRTIO}" ]; then
+		DISKCMD="-drive file=${IMGFILE},if=virtio,boot=on"
+	else
+		DISKCMD="-hda ${IMGFILE} "
+	fi
 fi
 
 case "${NETTYPE}" in
