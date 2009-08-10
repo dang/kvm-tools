@@ -93,9 +93,9 @@ if [ -f ${RCFILE} ]; then
 	source ${RCFILE}
 fi
 
-if [ -f ${CONFFILE} ]; then
+if [ -f "${CONFFILE}" ]; then
 	echo "sourcing ${CONFFILE}"
-	source ${CONFFILE}
+	source "${CONFFILE}"
 fi
 
 if [ -z "${DISKCMD}" ]; then
@@ -113,6 +113,7 @@ fi
 if [ -z "${NIC}" ]; then
 	if [ -z "${MAC}" ]; then
 		MAC=$(${MYLOC}/kvm-macaddr)
+		echo "MAC=${MAC}" >> "${CONFFILE}"
 	fi
 	NIC="nic${NICMODEL},macaddr=${MAC}"
 fi
