@@ -86,6 +86,7 @@ VIRTIO=
 MOUSE="-usb -usbdevice tablet"
 SOUND=
 SMP=
+EXTRADISK=
 
 if [ -f ${RCFILE} ]; then
 	echo "sourcing ${RCFILE}"
@@ -103,7 +104,7 @@ if [ -z "${DISKCMD}" ]; then
 	fi
 
 	if [ -n "${VIRTIO}" ]; then
-		DISKCMD="-drive file=${IMGFILE},if=virtio,boot=on"
+		DISKCMD="-drive file=${IMGFILE},index=0,media=disk,if=virtio,boot=on"
 	else
 		DISKCMD="-hda ${IMGFILE} "
 	fi
@@ -131,4 +132,4 @@ case "${NETTYPE}" in
 		;;
 esac
 
-${CMD} ${DISKCMD} -m ${MEMORY} ${GRAPHICS} ${MOUSE} ${CDROM} ${BOOT} ${SOUND} ${SMP}
+${CMD} ${DISKCMD} -m ${MEMORY} ${GRAPHICS} ${MOUSE} ${CDROM} ${BOOT} ${EXTRADISK} ${SOUND} ${SMP}
