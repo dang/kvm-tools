@@ -63,9 +63,9 @@ cd /etc/init.d && sudo ln -s net.lo net.vtap0
 edit /etc/conf.d/net and add these lines:
 networkmanager_vtap0="ignore"
 tuntap_vtap0="tap"
-config_vtap0="192.168.192.254/24"
+config_vtap0=("192.168.192.254/24")
 edit /etc/conf.d/vde:
 VDE_TAP="vtap0"
 VDE_SOCK_CHMOD="770"
-VDE_SOCK_CHOWN=":kvm"
+VDE_SOCK_CHOWN=":qemu"
 sudo rc-update add vde default
