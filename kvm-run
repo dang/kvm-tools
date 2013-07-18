@@ -87,6 +87,7 @@ MOUSE="-usb -usbdevice tablet"
 SOUND=
 SMP=
 EXTRADISK=
+KVM="qemu-system-x86_64 -enable-kvm"
 
 if [ -f ${RCFILE} ]; then
 	echo "sourcing ${RCFILE}"
@@ -120,13 +121,13 @@ fi
 
 case "${NETTYPE}" in
 	system-vde)
-		CMD="kvm -net ${NIC} -net vde,sock=/var/run/vde.ctl"
+		CMD="${KVM} -net ${NIC} -net vde,sock=/var/run/vde.ctl"
 		;;
 	none)
-		CMD="kvm"
+		CMD="${KVM}"
 		;;
 	bridge)
-		CMD="kvm -net ${NIC} -net tap,ifname=${BRIDGETAP}"
+		CMD="${KVM} -net ${NIC} -net tap,ifname=${BRIDGETAP}"
 		;;
 	*)
 		die "Unknown NETTYPE ${NETTYPE}"

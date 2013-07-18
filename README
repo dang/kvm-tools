@@ -9,7 +9,7 @@ mkdir -p ~/virtualization/test
 
 3. Make an image for the machine
 
-kvm-img create -f raw ~/virtualization/test/test.img 20G
+qemu-img create -f raw ~/virtualization/test/test.img 20G
 
 4. Copy the kvm-run.conf and edit appropriately (setting at least IMGFILE)
 
