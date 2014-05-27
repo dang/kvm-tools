@@ -105,7 +105,7 @@ if [ -z "${DISKCMD}" ]; then
 	fi
 
 	if [ -n "${VIRTIO}" ]; then
-		DISKCMD="-drive file=${IMGFILE},index=0,media=disk,if=virtio,boot=on"
+		DISKCMD="-drive file=${IMGFILE},index=0,media=disk,if=virtio"
 	else
 		DISKCMD="-hda ${IMGFILE} "
 	fi
