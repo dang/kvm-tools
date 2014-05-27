@@ -2,10 +2,12 @@
 #
 # Mount a raw kvm image.  Assumes it's partitioned, and the partition to mount is the last one.
 
+PARTCMD='tail -n1'
 
 # Set usage output
-USAGE="[-h |--help] [<img-file>]"
+USAGE="[-h |--help] [-f | --first-partition ] [<img-file>]"
 LONGUSAGE="\t-h, --help\n\t\tPrint this help message
+\t-f, --first-partition\n\t\tMount the first partition, rather than the last
 \t<img-file>\n\t\tImage file to mount (defaults to IMGFILE from kvm-run.conf)"
 
 # Standard functions
@@ -15,16 +17,17 @@ source ${HOME}/.scripts/functions.sh
 ME=$(basename $0)
 
 # Parse arguments
-ARGS=`getopt -o h --long help -n "${ME}" -- "$@"`
+ARGS=`getopt -o hf --long help,first-partition -n "${ME}" -- "$@"`
 
 if [ $? != 0 ] ; then
-	usage 
+	usage "invalid arguments"
 fi
 eval set -- "$ARGS"
 
 while true ; do
 	case "$1" in
 		-h|--help) usage; shift ;;
+		-f|--first-partition) FIRSTPART='yes';; shift ;;
 		--) shift ; break ;;
 		* ) usage "Invalid argument $1";;
 	esac
@@ -49,7 +52,11 @@ if [ -z "$(file ${IMGFILE} | grep "x86 boot sector")" ]; then
 	die "${IMGFILE} is not a raw image file"
 fi
 
-STARTSECTOR=$(file ${IMGFILE} | grep -o "startsector [0-9]*" | tail -n 1 | awk '{print $2}')
+if [ -n "$FIRSTPART" ]; then
+	PARTCMD='head -n1'
+fi
+
+STARTSECTOR=$(file ${IMGFILE} | grep -o "startsector [0-9]*" | ${PARTCMD} | awk '{print $2}')
 
 ROOTOFFSET=$((${STARTSECTOR} * 512))
 
@@ -60,11 +67,11 @@ fi
 sudo mount -o loop,offset=${ROOTOFFSET} ${IMGFILE} mnt/
 
 if [ ! -d mnt/boot ]; then
-	exit
+	die "No boot; not mounted"
 fi
 
-STARTSECTOR=$(file ${IMGFILE} | grep -o "startsector [0-9]*" | head -n 1 | awk '{print $2}')
-
-BOOTOFFSET=$((${STARTSECTOR} * 512))
-
-sudo mount -o loop,offset=${BOOTOFFSET} ${IMGFILE} mnt/boot/
+if [ -z "$FIRSTPART" ]; then
+	STARTSECTOR=$(file ${IMGFILE} | grep -o "startsector [0-9]*" | head -n 1 | awk '{print $2}')
+	BOOTOFFSET=$((${STARTSECTOR} * 512))
+	sudo mount -o loop,offset=${BOOTOFFSET} ${IMGFILE} mnt/boot/
+fi
