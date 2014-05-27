@@ -27,7 +27,7 @@ eval set -- "$ARGS"
 while true ; do
 	case "$1" in
 		-h|--help) usage; shift ;;
-		-f|--first-partition) FIRSTPART='yes';; shift ;;
+		-f|--first-partition) FIRSTPART='yes'; shift ;;
 		--) shift ; break ;;
 		* ) usage "Invalid argument $1";;
 	esac
