@@ -1,6 +1,18 @@
 #!/bin/bash
 #
 # Operate on a virsh cluster
+#
+# Directory layout:
+# <base>/			- Base directory for clusters.  Lots of storage space recommended
+#       /BASEIMG/		- Directory containing the base image file and XML templates
+#       /clusters/		- Directory containing instantiated cluster
+#                /<cname>	- Cluster dir; contains the disk image, and XML used to create the cluster
+#
+# Commands:
+# <none>	- Print info about the named cluster
+# --create	- Create a new cluster with the given name and parameters
+# --delete	- Delete an existing cluster.  All boxes and networks that can be found are nuked, and the cluster directory.
+# --rename	- Rename a cluster.  This invloves deleting the virsh config (but not the disk images) and re-creating, because virsh cannot rename
 
 BASEDIR="${PWD}"
 
