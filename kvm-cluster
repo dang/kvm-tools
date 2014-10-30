@@ -13,10 +13,17 @@
 # --create	- Create a new cluster with the given name and parameters
 # --delete	- Delete an existing cluster.  All boxes and networks that can be found are nuked, and the cluster directory.
 # --rename	- Rename a cluster.  This invloves deleting the virsh config (but not the disk images) and re-creating, because virsh cannot rename
+#
+# Environment:
+# KVM_CLUSTER_BASE	- This can hold the path to the base of the cluster tree (<base> above).  It defaults to PWD
 
-BASEDIR="${PWD}"
+if [ -n "${KVM_CLUSTER_BASE}" ]; then
+	BASEDIR="${KVM_CLUSTER_BASE}"
+else
+	BASEDIR="${PWD}"
+fi
 
-IMGBASE="BASEIMG"
+IMGBASE="${BASEDIR}/BASEIMG"
 CBASE="clusters"
 NUMBOXES=2
 NUMNETS=2
@@ -290,11 +297,17 @@ esac
 if [ -z "${CDIR}" ]; then
 	CDIR="${BASEDIR}/${CBASE}/${CNAME}"
 fi
+IDIR=$(readlink -f "${IMGBASE}")
+
+if [ ! -d "${BASEDIR}/${CBASE}" ]; then
+	die "Could not find cluster base directory: ${BASEDIR}/${CBASE}"
+elif [ ! -d "${IDIR}" ]; then
+	die "Could not find image base directory: ${IDIR}"
+fi
 
 cmd_exists virsh
 VIRSH_BOXES=$(virsh list --all | egrep "${CNAME}-[0-9]" | awk '{printf "%s ", $2}')
 VIRSH_NETS=$(virsh net-list --all | egrep "(${CNAME}-pnet[0-9])|(${CNAME}-n[0-9])" | awk '{printf "%s ", $1}')
-IDIR=$(readlink -f "${IMGBASE}")
 # Check parameters
 case "${COMMAND}" in
 	"create")
