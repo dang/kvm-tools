@@ -298,6 +298,7 @@ if [ -z "${CDIR}" ]; then
 	CDIR="${BASEDIR}/${CBASE}/${CNAME}"
 fi
 IDIR=$(readlink -f "${IMGBASE}")
+IMGBASE=$(basename "${IDIR}")
 
 if [ ! -d "${BASEDIR}/${CBASE}" ]; then
 	die "Could not find cluster base directory: ${BASEDIR}/${CBASE}"
