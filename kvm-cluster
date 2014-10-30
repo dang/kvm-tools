@@ -20,24 +20,21 @@ IMGBASE="BASEIMG"
 CBASE="clusters"
 NUMBOXES=2
 NUMNETS=2
-COMMAND="info"
+COMMAND="unset"
 
 # Set usage output
-USAGE="[-h |--help] [-i <image-base> | --image-base=<image-base>] [-t <target-dir> | --target-directory=<target-dir>] [-b <number-boxes> | --number-boxes=<number-boxes>] [-n <number-networks> | --number-networks=<number-networks>] [(-c | --create) | (-d | --delete) | (-r | --rename)] <cluster-name> [<new-cluster-name>]"
+USAGE="[-h |--help] [-b <base-directory> | --base-directory-base=<base-directory>] [-t <target-dir> | --target-directory=<target-dir>] [-m <number-machines> | --machine-count=<number-machines>] [-n <number-networks> | --network-count=<number-networks>] ((-i <cluster-name> | --info <cluster-name>) (-c <cluster-name> | --create <cluster-name>) | (-d <cluster-name> | --delete <cluster-name>) | (-r <old-cluster-name> <new-cluster-name> | --rename <old-cluster-name> <new-cluster-name>))"
 LONGUSAGE="\t-h, --help\n\t\tPrint this help message
-\t-i <image-base>, --image-base=<image-base>\n\t\tBase cluster image. Default: ./${IMGBASE}
+\t-b <base-directory>, --base-directory=<base-directory>\n\t\tBase cluster image directory. Default: ./${IMGBASE}
 \t-t <target-dir>, --target-directory=<target-dir>\n\t\tDirectory to place cluster. Default: ./${CBASE}/<cluster-name>
-\t-b <number-boxes>, --number-boxes=<number-boxes>\n\t\tNumber of boxes in cluster. Default: ${NUMBOXES}
-\t-n <number-networks>, --number-networks=<number-networks>\n\t\tNumber of networks in cluster. Default: ${NUMNETS}
-\t<cluster-name>\n\t\tName of cluster on which to operate
-\t<new-cluster-name>\n\t\tFor rename, new name of cluster
+\t-m <number-machines>, --machine-count=<number-machines>\n\t\tNumber of machines in cluster. Default: ${NUMBOXES}
+\t-n <number-networks>, --network-count=<number-networks>\n\t\tNumber of networks in cluster. Default: ${NUMNETS}
 
 \t Commands:
-\t-c, --create\n\t\tCreate a new cluster
-\t-d, --delete\n\t\tDelete an existing cluster
-\t-r, --rename\n\t\tRename an existing cluster.  Requires extra name parameter
-
-\t If no command is given, information about the cluster is printed"
+\t-i, --info <cluster-name>\n\t\tPrint info about a cluster
+\t-c, --create <cluster-name>\n\t\tCreate a new cluster
+\t-d, --delete <cluster-name>\n\t\tDelete an existing cluster
+\t-r, --rename <old-cluster-name> <new-cluster-name>\n\t\tRename an existing cluster."
 
 # Standard functions
 die() {
@@ -66,11 +63,12 @@ usage() {
 
 # Helper functions
 setcommand() {
-	if [ "${COMMAND}" == "info" ]; then
+	if [ "${COMMAND}" == "unset" ]; then
 		COMMAND="$1"
 	else
 		usage "Only one command may be given"
 	fi
+	CNAME=$2
 }
 pinfo() {
 	local cdir="${CDIR}"
@@ -244,7 +242,7 @@ cluster_info() {
 ME=$(basename $0)
 
 # Parse arguments
-ARGS=`getopt -o hi:t:b:n:cdr --long help,image-base:,target-directory:,number-boxes,:number-networks:,create,delete,rename -n "${ME}" -- "$@"`
+ARGS=`getopt -o hb:t:m:n:i:c:d:r: --long help,base-directory:,target-directory:,machine-count:,network-count:,info:,create:,delete:,rename: -n "${ME}" -- "$@"`
 
 if [ $? != 0 ] ; then
 	usage "invalid arguments"
@@ -254,13 +252,14 @@ eval set -- "$ARGS"
 while true ; do
 	case "$1" in
 		-h|--help) usage; shift ;;
-		-i|--image-base) IMGBASE=$2 ; shift 2 ;;
+		-b|--base-directory) IMGBASE=$2 ; shift 2 ;;
 		-t|--target-directory) CDIR=$2 ; shift 2 ;;
-		-b|--number-boxes) NUMBOXES=$2 ; shift 2 ;;
-		-n|--number-networks) NUMNETS=$2 ; shift 2 ;;
-		-c|--create) setcommand "create"; shift;;
-		-d|--delete) setcommand "delete"; shift ;;
-		-r|--rename) setcommand "rename"; shift ;;
+		-m|--machine-count) NUMBOXES=$2 ; shift 2 ;;
+		-n|--network-count) NUMNETS=$2 ; shift 2 ;;
+		-i|--info) setcommand "info" $2; shift 2;;
+		-c|--create) setcommand "create" $2; shift 2;;
+		-d|--delete) setcommand "delete" $2; shift 2;;
+		-r|--rename) setcommand "rename" $2; shift 2;;
 		--) shift ; break ;;
 		* ) usage "Invalid argument $1";;
 	esac
@@ -268,15 +267,25 @@ done
 
 # Remaining arguments are in $1, $2, etc. as normal
 
-if [ -z "${1}" ]; then
-	usage "No cluster name given"
-else
-	CNAME="${1}"
-fi
-
-if [ -n "${2}" ]; then
-	NEWCNAME="${2}"
-fi
+# Argument checking
+case "${COMMAND}" in
+	"create")
+		;;
+	"delete")
+		;;
+	"rename")
+		if [ -z "$1" ]; then
+			usage "--rename requires two parameters"
+		fi
+		NEWCNAME=$1
+		;;
+	"info")
+		;;
+	"unset")
+		usage "No command given"
+		;;
+	* ) usage "Unknown command ${COMMAND}";;
+esac
 
 if [ -z "${CDIR}" ]; then
 	CDIR="${BASEDIR}/${CBASE}/${CNAME}"
