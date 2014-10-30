@@ -162,7 +162,66 @@ cluster_rename() {
 		die "cannot rename cluster ${CNAME}: VMs do not exist"
 	fi
 	echo "Renaming cluster ${CNAME} to ${NEWNAME}"
-	# Don't need extra networks
+	pinfo "Original"
+
+	TDIR=$(mktemp -d)
+
+	# Power them all down
+	for box in ${VIRSH_BOXES}; do
+		virsh destroy ${box} > /dev/null 2>&1
+	done
+
+	# Move dir, rename files
+	newdir=${CDIR/${CNAME}/${NEWCNAME}}
+	sudo mv "${CDIR}" "${newdir}"
+
+	# Rename the neworks
+	for net in ${VIRSH_NETS}; do
+		if [[ $net =~ pnet ]]; then
+			newnet=${net/${CNAME}-pnet/${NEWCNAME}-n}
+			oldfbase=${net/${CNAME}-pnet/${CNAME}-net}
+			newfbase=${newnet/${NEWCNAME}-pnet/${NEWCNAME}-net}
+		else
+			newnet=${net/${CNAME}/${NEWCNAME}}
+			oldfbase=${net/${CNAME}-n/${CNAME}-net}
+			newfbase=${newnet/${NEWCNAME}-n/${NEWCNAME}-net}
+		fi
+		virsh net-dumpxml ${net} > "${TDIR}/${newnet}.xml" || die "Failed to dump ${net}"
+		virsh net-destroy ${net} || die "Failed to destroy ${net}"
+		virsh net-undefine ${net}  > /dev/null 2>&1 # may have been non-persistant
+		sudo mv "${newdir}/${oldfbase}.xml" "${newdir}/${newfbase}.xml"
+		for f in "${TDIR}/${newnet}.xml" "${newdir}/${newfbase}.xml"; do
+			sed -i  -e "s#<name>${net}</name>#<name>${newnet}</name>#g" \
+				-e "s#virbr-${CNAME}#virbr-${NEWCNAME}#g" \
+				-e "s#pnet#n#g" \
+				"${f}"
+		done
+		virsh net-define "${TDIR}/${newnet}.xml" || die "Couldn't create ${newnet}"
+		virsh net-start "${newnet}" || die "Couldn't start ${newnet}"
+	done
+
+	# Rename boxes
+	for box in ${VIRSH_BOXES}; do
+		newbox=${box/${CNAME}/${NEWCNAME}}
+		oldfbase=${box/${CNAME}-/${CNAME}-box}
+		newfbase=${newbox/${NEWCNAME}-/${NEWCNAME}-box}
+		virsh dumpxml ${box} > "${TDIR}/${newbox}.xml" || die "Failed to dump ${box}"
+		virsh undefine ${box} || die "Failed to destroy ${box}"
+		sudo mv "${newdir}/${oldfbase}.img" "${newdir}/${newfbase}.img"
+		sudo mv "${newdir}/${oldfbase}.xml" "${newdir}/${newfbase}.xml"
+		for f in "${TDIR}/${newbox}.xml" "${newdir}/${newfbase}.xml"; do
+			sed -i  -e "s#<name>${box}</name>#<name>${newbox}</name>#g" \
+				-e "s#<source file='${CDIR}/${oldfbase}#<source file='${newdir}/${newfbase}#g" \
+				-e "s#<source network='${CNAME}#<source network='${NEWCNAME}#g" \
+				-e "s#pnet#n#g" \
+				"${f}"
+		done
+		virsh define "${TDIR}/${newbox}.xml" || die "Couldn't create ${newbox}"
+	done
+
+	rm -rf "${TDIR}"
+
+	echo "Renamed cluster ${CNAME} to ${NEWCNAME}"
 }
 
 cluster_info() {
