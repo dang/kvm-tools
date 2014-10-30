@@ -112,7 +112,8 @@ cluster_create() {
 		NETBYTE=$((${net} + 20))
 		sed -i -e "s#CLUSTERNAME#${CNAME}#" -e "s#NETNUM#${net}#" -e "s#NETBYTE#${NETBYTE}#" -e "s#CBYTES#${CBYTES}#" "${NNAME}"
 
-		virsh net-create "${NNAME}" || die "Couldn't create ${NNAME}"
+		virsh net-define "${NNAME}" || die "Couldn't create ${NNAME}"
+		virsh net-start "${CNAME}-n${net}" || die "Couldn't start ${CNAME}-n${net}"
 	done
 
 	for BNUM in $(seq -f '%02.0f' ${NUMBOXES}); do
@@ -139,12 +140,12 @@ cluster_delete() {
 	pinfo "Deleting"
 
 	for box in ${VIRSH_BOXES}; do
-		virsh destroy ${box}
+		virsh destroy ${box} > /dev/null 2>&1
 		virsh undefine ${box} || die "Failed to undefine ${box}"
 	done
 	for net in ${VIRSH_NETS}; do
 		virsh net-destroy ${net} || die "Failed to destroy ${net}"
-		#virsh net-undefine ${net} || die "Failed to undefine ${net}"
+		virsh net-undefine ${net}  > /dev/null 2>&1 # may have been non-persistant
 	done
 	if [ -d "${CDIR}" ]; then
 		rm -rf "${CDIR}" || die "Failed to remove ${CDIR}"
@@ -211,8 +212,8 @@ if [ -z "${CDIR}" ]; then
 fi
 
 cmd_exists virsh
-VIRSH_BOXES=$(virsh list --all | grep "${CNAME}-" | awk '{printf "%s ", $2}')
-VIRSH_NETS=$(virsh net-list --all | grep "${CNAME}-p" | awk '{printf "%s ", $1}')
+VIRSH_BOXES=$(virsh list --all | egrep "${CNAME}-[0-9]" | awk '{printf "%s ", $2}')
+VIRSH_NETS=$(virsh net-list --all | egrep "(${CNAME}-pnet[0-9])|(${CNAME}-n[0-9])" | awk '{printf "%s ", $1}')
 IDIR=$(readlink -f "${IMGBASE}")
 # Check parameters
 case "${COMMAND}" in
