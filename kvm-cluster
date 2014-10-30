@@ -61,10 +61,19 @@ setcommand() {
 	fi
 }
 pinfo() {
+	local cdir="${CDIR}"
+	if [ ! -d "${CDIR}" ]; then
+		cdir="${CDIR} (does not exist)"
+	fi
 	echo "$@ cluster ${CNAME}:"
-	echo -e "\tDirectory: ${CDIR}"
+	echo -e "\tDirectory: ${cdir}"
 	echo -e "\tBoxes: ${VIRSH_BOXES}"
-	echo -e "\tNetworks: ${VIRSH_NETS}"
+	echo -e "\tNetworks:"
+	for net in ${VIRSH_NETS}; do
+		uuid=$(virsh net-info ${net} | grep UUID)
+		echo -e "\t\tName:\t\t${net}"
+		echo -e "\t\t${uuid}"
+	done
 }
 cmd_exists() {
 	which $1 > /dev/null 2>&1
