@@ -30,7 +30,7 @@ NUMNETS=2
 COMMAND="unset"
 
 # Set usage output
-USAGE="[-h |--help] [-b <base-directory> | --base-directory-base=<base-directory>] [-t <target-dir> | --target-directory=<target-dir>] [-m <number-machines> | --machine-count=<number-machines>] [-n <number-networks> | --network-count=<number-networks>] ((-i <cluster-name> | --info <cluster-name>) (-c <cluster-name> | --create <cluster-name>) | (-d <cluster-name> | --delete <cluster-name>) | (-r <old-cluster-name> <new-cluster-name> | --rename <old-cluster-name> <new-cluster-name>))"
+USAGE="[-h |--help] (-i | --info) | (-c | --create) | (-d | --delete) | (-r | --rename) | (-B | --boot) | (-H | --halt)"
 LONGUSAGE="\t-h, --help\n\t\tPrint this help message
 \t-b <base-directory>, --base-directory=<base-directory>\n\t\tBase cluster image directory. Default: ./${IMGBASE}
 \t-t <target-dir>, --target-directory=<target-dir>\n\t\tDirectory to place cluster. Default: ./${CBASE}/<cluster-name>
@@ -41,7 +41,10 @@ LONGUSAGE="\t-h, --help\n\t\tPrint this help message
 \t-i, --info <cluster-name>\n\t\tPrint info about a cluster <default>
 \t-c, --create <cluster-name>\n\t\tCreate a new cluster
 \t-d, --delete <cluster-name>\n\t\tDelete an existing cluster
-\t-r, --rename <old-cluster-name> <new-cluster-name>\n\t\tRename an existing cluster."
+\t-r, --rename <old-cluster-name> <new-cluster-name>\n\t\tRename an existing cluster
+\t-B, --boot <cluster-name>\n\t\tBoot any boxes in the cluster not currently running
+\t-H, --halt <cluster-name>\n\t\tHalt any boxes in the cluster currently running
+"
 
 # Standard functions
 die() {
@@ -77,7 +80,7 @@ setcommand() {
 	fi
 	CNAME=$2
 }
-pinfo() {
+pinfo_detail() {
 	local cdir="${CDIR}"
 	if [ ! -d "${CDIR}" ]; then
 		cdir="${CDIR} (does not exist)"
@@ -86,14 +89,24 @@ pinfo() {
 	echo -e "\tDirectory: ${cdir}"
 	echo -e "\tBoxes:"
 	for box in ${VIRSH_BOXES}; do
-		echo -e "\t\tName:\t\t${box}\t\t\t${BOX_STATE[${box}]}"
+		echo -e "\t\t${box}\t\t\t${BOX_STATE[${box}]}"
 	done
 	echo -e "\tNetworks:"
 	for net in ${VIRSH_NETS}; do
 		uuid=$(virsh net-info ${net} | grep UUID)
-		echo -e "\t\tName:\t\t${net}"
+		echo -e "\t\tName:\t${net}"
 		echo -e "\t\t${uuid}"
+		echo -e "\t\tActive:\t\t${NET_STATE[${net}]}"
 	done
+}
+pinfo() {
+	local cdir="${CDIR}"
+	if [ ! -d "${CDIR}" ]; then
+		cdir="${CDIR} (does not exist)"
+	fi
+	echo "$@ cluster ${CNAME}:"
+	echo -e "\tBoxes: ${VIRSH_BOXES}"
+	echo -e "\tNetworks: ${VIRSH_NETS}"
 }
 cmd_exists() {
 	which $1 > /dev/null 2>&1
@@ -245,14 +258,48 @@ cluster_rename() {
 }
 
 cluster_info() {
-	pinfo "Info on"
+	pinfo_detail "Info on"
+}
+
+cluster_boot() {
+	if [ -z "${VIRSH_BOXES}" ]; then
+		die "cannot boot cluster ${CNAME}: VMs do not exist"
+	fi
+	pinfo "Booting"
+	for net in ${VIRSH_NETS}; do
+		if [ "${NET_STATE[${net}]}" == "no" ]; then
+			virsh net-start ${net} || die "Failed to start ${net}"
+		fi
+	done
+	for box in ${VIRSH_BOXES}; do
+		if [ "${BOX_STATE[${box}]}" == "halted" ]; then
+			virsh start ${box} || die "Failed to boot ${box}"
+		fi
+	done
+}
+
+cluster_halt() {
+	if [ -z "${VIRSH_BOXES}" ]; then
+		die "cannot halt cluster ${CNAME}: VMs do not exist"
+	fi
+	pinfo "Halting"
+	for box in ${VIRSH_BOXES}; do
+		if [ "${BOX_STATE[${box}]}" == "running" ]; then
+			virsh shutdown ${box} || die "Failed to halt ${box}"
+		fi
+	done
+	for net in ${VIRSH_NETS}; do
+		if [ "${NET_STATE[${net}]}" == "yes" ]; then
+			virsh net-destroy ${net} || die "Failed to stop ${net}"
+		fi
+	done
 }
 
 # Script name
 ME=$(basename $0)
 
 # Parse arguments
-ARGS=`getopt -o hb:t:m:n:i:c:d:r: --long help,base-directory:,target-directory:,machine-count:,network-count:,info:,create:,delete:,rename: -n "${ME}" -- "$@"`
+ARGS=`getopt -o hb:t:m:n:i:c:d:r:B:H: --long help,base-directory:,target-directory:,machine-count:,network-count:,info:,create:,delete:,rename:,boot:,halt: -n "${ME}" -- "$@"`
 
 if [ $? != 0 ] ; then
 	usage "invalid arguments"
@@ -270,6 +317,8 @@ while true ; do
 		-c|--create) setcommand "create" $2; shift 2;;
 		-d|--delete) setcommand "delete" $2; shift 2;;
 		-r|--rename) setcommand "rename" $2; shift 2;;
+		-B|--boot) setcommand "boot" $2; shift 2;;
+		-H|--halt) setcommand "halt" $2; shift 2;;
 		--) shift ; break ;;
 		* ) usage "Invalid argument $1";;
 	esac
@@ -290,6 +339,10 @@ case "${COMMAND}" in
 		NEWCNAME=$1
 		;;
 	"info")
+		;;
+	"boot")
+		;;
+	"halt")
 		;;
 	"unset")
 		if [ -z "$1" ]; then
@@ -318,7 +371,7 @@ VIRSH_BOXES=$(virsh list --all | egrep "${CNAME}-[0-9]" | awk '{printf "%s ", $2
 running=$(virsh list --state-running | egrep "${CNAME}-[0-9]" | awk '{printf "%s ", $2}')
 declare -A BOX_STATE
 for box in ${VIRSH_BOXES}; do
-	is_running=""
+	is_running="halted"
 	for run in ${running}; do
 		if [ "${run}" == "${box}" ]; then
 			is_running="running"
@@ -328,6 +381,18 @@ for box in ${VIRSH_BOXES}; do
 	BOX_STATE[$box]=${is_running}
 done
 VIRSH_NETS=$(virsh net-list --all | egrep "(${CNAME}-pnet[0-9])|(${CNAME}-n[0-9])" | awk '{printf "%s ", $1}')
+running=$(virsh net-list | egrep "(${CNAME}-pnet[0-9])|(${CNAME}-n[0-9])" | awk '{printf "%s ", $1}')
+declare -A NET_STATE
+for net in ${VIRSH_NETS}; do
+	is_running="no"
+	for run in ${running}; do
+		if [ "${run}" == "${net}" ]; then
+			is_running="yes"
+			break
+		fi
+	done
+	NET_STATE[$net]=${is_running}
+done
 # Check parameters
 case "${COMMAND}" in
 	"create")
@@ -341,6 +406,12 @@ case "${COMMAND}" in
 		;;
 	"info")
 		cluster_info
+		;;
+	"boot")
+		cluster_boot
+		;;
+	"halt")
+		cluster_halt
 		;;
 	* ) usage "Unknown command ${COMMAND}";;
 esac
