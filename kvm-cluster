@@ -9,7 +9,7 @@
 #                /<cname>	- Cluster dir; contains the disk image, and XML used to create the cluster
 #
 # Commands:
-# <none>	- Print info about the named cluster
+# --info	- Print info about the named cluster
 # --create	- Create a new cluster with the given name and parameters
 # --delete	- Delete an existing cluster.  All boxes and networks that can be found are nuked, and the cluster directory.
 # --rename	- Rename a cluster.  This invloves deleting the virsh config (but not the disk images) and re-creating, because virsh cannot rename
@@ -38,7 +38,7 @@ LONGUSAGE="\t-h, --help\n\t\tPrint this help message
 \t-n <number-networks>, --network-count=<number-networks>\n\t\tNumber of networks in cluster. Default: ${NUMNETS}
 
 \t Commands:
-\t-i, --info <cluster-name>\n\t\tPrint info about a cluster
+\t-i, --info <cluster-name>\n\t\tPrint info about a cluster <default>
 \t-c, --create <cluster-name>\n\t\tCreate a new cluster
 \t-d, --delete <cluster-name>\n\t\tDelete an existing cluster
 \t-r, --rename <old-cluster-name> <new-cluster-name>\n\t\tRename an existing cluster."
@@ -57,7 +57,7 @@ usage() {
 		myusage="No usage given"
 	fi
 	if [ -n "$1" ]; then
-		echo "$@"
+		echo -e "${ME}: $@"
 	fi
 	echo ""
 	echo "Usage:"
@@ -292,7 +292,10 @@ case "${COMMAND}" in
 	"info")
 		;;
 	"unset")
-		usage "No command given"
+		if [ -z "$1" ]; then
+			usage
+		fi
+		setcommand "info" $1
 		;;
 	* ) usage "Unknown command ${COMMAND}";;
 esac
