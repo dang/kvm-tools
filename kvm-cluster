@@ -84,7 +84,10 @@ pinfo() {
 	fi
 	echo "$@ cluster ${CNAME}:"
 	echo -e "\tDirectory: ${cdir}"
-	echo -e "\tBoxes: ${VIRSH_BOXES}"
+	echo -e "\tBoxes:"
+	for box in ${VIRSH_BOXES}; do
+		echo -e "\t\tName:\t\t${box}\t\t\t${BOX_STATE[${box}]}"
+	done
 	echo -e "\tNetworks:"
 	for net in ${VIRSH_NETS}; do
 		uuid=$(virsh net-info ${net} | grep UUID)
@@ -307,7 +310,20 @@ elif [ ! -d "${IDIR}" ]; then
 fi
 
 cmd_exists virsh
+#IFS=', ' read -a VIRSH_BOXES <<< "$string"
 VIRSH_BOXES=$(virsh list --all | egrep "${CNAME}-[0-9]" | awk '{printf "%s ", $2}')
+running=$(virsh list --state-running | egrep "${CNAME}-[0-9]" | awk '{printf "%s ", $2}')
+declare -A BOX_STATE
+for box in ${VIRSH_BOXES}; do
+	is_running=""
+	for run in ${running}; do
+		if [ "${run}" == "${box}" ]; then
+			is_running="running"
+			break
+		fi
+	done
+	BOX_STATE[$box]=${is_running}
+done
 VIRSH_NETS=$(virsh net-list --all | egrep "(${CNAME}-pnet[0-9])|(${CNAME}-n[0-9])" | awk '{printf "%s ", $1}')
 # Check parameters
 case "${COMMAND}" in
