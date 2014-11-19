@@ -27,6 +27,8 @@ IMGBASE="${BASEDIR}/BASEIMG"
 CBASE="clusters"
 NUMBOXES=2
 NUMNETS=2
+NUMVBLOCKS=1
+VBLOCK_SIZE="20G"
 COMMAND="unset"
 
 # Set usage output
@@ -36,6 +38,7 @@ LONGUSAGE="\t-h, --help\n\t\tPrint this help message
 \t-t <target-dir>, --target-directory=<target-dir>\n\t\tDirectory to place cluster. Default: ./${CBASE}/<cluster-name>
 \t-m <number-machines>, --machine-count=<number-machines>\n\t\tNumber of machines in cluster. Default: ${NUMBOXES}
 \t-n <number-networks>, --network-count=<number-networks>\n\t\tNumber of networks in cluster. Default: ${NUMNETS}
+\t-v <number-vblock>, --vblock-count=<number-vblock>\n\t\tNumber of extra virtual block devices. Default: ${NUMVBLOCKS}
 
 \t Commands:
 \t-i, --info <cluster-name>\n\t\tPrint info about a cluster <default>
@@ -135,6 +138,7 @@ cluster_create() {
 	echo -e "\tImage Basename: ${IMGBASE}"
 	echo -e "\tNumber of boxes: ${NUMBOXES}"
 	echo -e "\tNumber of networks: ${NUMNETS}"
+	echo -e "\tNumber of virtual block devices: ${NUMVBLOCKS}"
 	echo -e "\tMAC bytes: ${CBYTES}"
 
 	mkdir -p "${CDIR}" || die "failed to create ${CDIR}"
@@ -161,7 +165,17 @@ cluster_create() {
 			IFACES+="${NIFACE}\n"
 		done
 
-		sed -i -e "s#CLUSTERNAME#${CNAME}#" -e "s#BNUM#${BNUM}#" -e "s#CDIR#$CDIR#" -e "s#CBYTES#${CBYTES}#" -e "s#IFACES#${IFACES}#" ${DNAME}
+		VBLOCKS=""
+		VDEV="a"
+		for vblock in $(seq -f '%02.0f' ${NUMVBLOCKS}); do
+			SLOTNUM=$((${vblock} + 20))
+			VDEV=$(echo "${VDEV}" | tr "a-z" "b-z")
+			NVBLOCK=$(sed -e "s#VNUM#${vblock}#" -e "s#CLUSTERNAME#${CNAME}#" -e "s#CDIR#$CDIR#" -e "s#BNUM#${BNUM}#" -e "s#SLOTNUM#${SLOTNUM}#" -e "s#VDEV#vd${VDEV}#" "${IDIR}/${IMGBASE}-vblock-template.xml" | sed '{:q;N;s/\n/\\n/g;t q}')
+			VBLOCKS+="${NVBLOCK}\n"
+			qemu-img create -f raw "${CDIR}/${CNAME}-box${BNUM}-vblock${vblock}.img" "${VBLOCK_SIZE}"
+		done
+
+		sed -i -e "s#CLUSTERNAME#${CNAME}#" -e "s#BNUM#${BNUM}#" -e "s#CDIR#$CDIR#" -e "s#CBYTES#${CBYTES}#" -e "s#IFACES#${IFACES}#" -e "s#VBLOCKS#${VBLOCKS}#" ${DNAME}
 		virsh define "${DNAME}" || die "Couldn't define ${DNAME}"
 	done
 
@@ -299,7 +313,7 @@ cluster_halt() {
 ME=$(basename $0)
 
 # Parse arguments
-ARGS=`getopt -o hb:t:m:n:i:c:d:r:B:H: --long help,base-directory:,target-directory:,machine-count:,network-count:,info:,create:,delete:,rename:,boot:,halt: -n "${ME}" -- "$@"`
+ARGS=`getopt -o hb:t:m:n:i:c:d:r:B:H:v: --long help,base-directory:,target-directory:,machine-count:,network-count:,vblock-count:,info:,create:,delete:,rename:,boot:,halt: -n "${ME}" -- "$@"`
 
 if [ $? != 0 ] ; then
 	usage "invalid arguments"
@@ -313,6 +327,7 @@ while true ; do
 		-t|--target-directory) CDIR=$2 ; shift 2 ;;
 		-m|--machine-count) NUMBOXES=$2 ; shift 2 ;;
 		-n|--network-count) NUMNETS=$2 ; shift 2 ;;
+		-v|--vblock-count) NUMVBLOCKS=$2 ; shift 2 ;;
 		-i|--info) setcommand "info" $2; shift 2;;
 		-c|--create) setcommand "create" $2; shift 2;;
 		-d|--delete) setcommand "delete" $2; shift 2;;
