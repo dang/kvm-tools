@@ -1,6 +1,6 @@
     <disk type='file' device='disk'>
-      <driver name='qemu' type='raw' cache='writeback'/>
+      <driver name='qemu' type='raw' discard='unmap'/>
       <source file='CDIR/CLUSTERNAME-boxBNUM-vblockVNUM.img'/>
-      <target dev='VDEV' bus='virtio'/>
-      <alias name='virtio-diskVNUM'/>
+      <target dev='VDEV' bus='scsi'/>
+      <address type='drive' controller='0' bus='0' target='0' unit='VNUM'/>
     </disk>

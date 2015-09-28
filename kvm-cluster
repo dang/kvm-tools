@@ -23,30 +23,34 @@ else
 	BASEDIR="${PWD}"
 fi
 
-IMGBASE="${BASEDIR}/BASEIMG"
 CBASE="clusters"
+IMGBASE="BASEIMG"
 NUMBOXES=2
 NUMNETS=2
 NUMVBLOCKS=1
 VBLOCK_SIZE="20G"
-COMMAND="unset"
+VCPU="2"
+VMEM="8388608"
+VURI="qemu:///system"
 
-# Set usage output
-USAGE="[-h |--help] (-i | --info) | (-c | --create) | (-d | --delete) | (-r | --rename) | (-B | --boot) | (-H | --halt)"
-LONGUSAGE="\t-h, --help\n\t\tPrint this help message
-\t-b <base-directory>, --base-directory=<base-directory>\n\t\tBase cluster image directory. Default: ./${IMGBASE}
-\t-t <target-dir>, --target-directory=<target-dir>\n\t\tDirectory to place cluster. Default: ./${CBASE}/<cluster-name>
-\t-m <number-machines>, --machine-count=<number-machines>\n\t\tNumber of machines in cluster. Default: ${NUMBOXES}
-\t-n <number-networks>, --network-count=<number-networks>\n\t\tNumber of networks in cluster. Default: ${NUMNETS}
-\t-v <number-vblock>, --vblock-count=<number-vblock>\n\t\tNumber of extra virtual block devices. Default: ${NUMVBLOCKS}
+# Set global usage output
+DESCRIPTION="Control a KVM-based cluster"
+USAGE="[-h |--help] [-V | --verbose] [-c <cluster-dir> | --cluster-directory=<cluster-dir>] (info | create | delete | rename | boot | halt)"
+LONGUSAGE="Common options:
+\t-h, --help\n\t\tPrint this help message
+\t-V, --verbose\n\t\tBe verbose
+\t-b <base-directory>, --base-directory=<base-directory>\n\t\tBase setup directory. Default: ${BASEDIR}
+\t-c <cluster-dir>, --cluster-directory=<cluster-dir>\n\t\tDirectory for cluster. Default: ${BASEDIR}/${CBASE}/<cluster-name>
 
 \t Commands:
-\t-i, --info <cluster-name>\n\t\tPrint info about a cluster <default>
-\t-c, --create <cluster-name>\n\t\tCreate a new cluster
-\t-d, --delete <cluster-name>\n\t\tDelete an existing cluster
-\t-r, --rename <old-cluster-name> <new-cluster-name>\n\t\tRename an existing cluster
-\t-B, --boot <cluster-name>\n\t\tBoot any boxes in the cluster not currently running
-\t-H, --halt <cluster-name>\n\t\tHalt any boxes in the cluster currently running
+\tinfo\n\t\tPrint info about a cluster
+\tcreate\n\t\tCreate a new cluster
+\tdelete\n\t\tDelete an existing cluster
+\trename\n\t\tRename an existing cluster
+\tboot\n\t\tBoot any boxes in the cluster not currently running
+\thalt\n\t\tHalt any boxes in the cluster currently running
+
+\tFor more info about each command, pass --help to that command
 "
 
 # Standard functions
@@ -62,27 +66,245 @@ usage() {
 	else
 		myusage="No usage given"
 	fi
+	local me;
+	if [ -n "${ME}" ]; then
+		me=${ME}
+	else
+		me=$(basename $0)
+	fi
 	if [ -n "$1" ]; then
-		echo -e "${ME}: $@"
+		echo "$@"
 	fi
 	echo ""
+	if [ -n "${DESCRIPTION}" ]; then
+		echo -e "${me}: ${DESCRIPTION}"
+		echo ""
+	fi
 	echo "Usage:"
-	echo "`basename $0` ${myusage}"
+	echo "${me} ${myusage}"
 	if [ -n "${LONGUSAGE}" ]; then
 		echo -e "${LONGUSAGE}"
 	fi
 	exit 1
 }
 
-# Helper functions
-setcommand() {
-	if [ "${COMMAND}" == "unset" ]; then
-		COMMAND="$1"
-	else
-		usage "Only one command may be given"
+# Script name
+ME=$(basename $0)
+
+# Parse global arguments
+ARGS=`getopt -o +hVb:c: --long help,verbose,base-directory:,cluster-directory: -n "${ME}" -- "$@"`
+
+if [ $? != 0 ] ; then
+	usage "invalid arguments"
+fi
+eval set -- "$ARGS"
+
+while true ; do
+	case "$1" in
+		-h|--help) usage; shift ;;
+		-V|--verbose) export GTWS_VERBOSE=yes; shift ;;
+		-b|--base-directory) BASEDIR=$2 ; shift 2 ;;
+		-c|--cluster-directory) CDIR=$2 ; shift 2 ;;
+		--) shift ; break ;;
+		* ) usage "Invalid argument $1" ;;
+	esac
+done
+
+#
+# Opts processing for sub-commands
+#
+
+opts_info() {
+	local ME="${ME} ${COMMAND}"
+	local USAGE="[-h |--help] <cluster-name>"
+	local LONGUSAGE="\t-h, --help\n\t\tPrint this help message
+\t<cluster-name>\n\t\tName of cluster about which to get info.
+
+\tPrint info about a cluster, including boot state.
+"
+	local SUBARGS=""
+	SUBARGS=`getopt -o h --long help -n "${ME}" -- "$@"`
+	if [ $? != 0 ] ; then
+		usage "invalid arguments"
 	fi
-	CNAME=$2
+	eval set -- "$SUBARGS"
+
+	while true ; do
+		case "$1" in
+			-h|--help) usage; shift ;;
+			--) shift ; break ;;
+			* ) usage "Invalid argument $1" ;;
+		esac
+	done
+	CNAME="${1}"
+	if [ -z "${CNAME}" ]; then
+		usage "Must give cluster name"
+	fi
 }
+
+opts_create() {
+	local ME="${ME} ${COMMAND}"
+	local USAGE="[-h |--help] -i [<image-directory> | --image-directory=<image-directory>] [-m <number-machines> | --machine-count=<number-machines>] [-n <number-networks> | --network-count=<number-networks>] [-v <number-vblock> | --vblock-count=<number-vblock>] <cluster-name>"
+	local LONGUSAGE="\t-h, --help\n\t\tPrint this help message
+\t-i <image-directory>, --image-directory=<image-directory>\n\t\tDirectory containing image. Default: ${BASEDIR}/BASEDIR
+\t-m <number-machines>, --machine-count=<number-machines>\n\t\tNumber of machines in cluster. Default: ${NUMBOXES}
+\t-n <number-networks>, --network-count=<number-networks>\n\t\tNumber of networks in cluster. Default: ${NUMNETS}
+\t-v <number-vblock>, --vblock-count=<number-vblock>\n\t\tNumber of extra virtual block devices. Default: ${NUMVBLOCKS}
+\t<cluster-name>\n\t\tName of cluster to create.
+
+\tCreate a new cluster.  All clusters are on the public bridged network, and have a boot block device (based on the base image).  The number of boxes, private networks, and extra block devices can be configured.
+"
+	local SUBARGS=""
+	SUBARGS=`getopt -o hi:m:n:v: --long help,image-directory:,machine-count:,network-count:,vblock-count: -n "${ME}" -- "$@"`
+	if [ $? != 0 ] ; then
+		usage "invalid arguments"
+	fi
+	eval set -- "$SUBARGS"
+
+	while true ; do
+		case "$1" in
+			-h|--help) usage; shift ;;
+			-i|--image-directory) IDIR=$2 ; shift 2 ;;
+			-m|--machine-count) NUMBOXES=$2 ; shift 2 ;;
+			-n|--network-count) NUMNETS=$2 ; shift 2 ;;
+			-v|--vblock-count) NUMVBLOCKS=$2 ; shift 2 ;;
+			--) shift ; break ;;
+			* ) usage "Invalid argument $1" ;;
+		esac
+	done
+	CNAME="${1}"
+	if [ -z "${CNAME}" ]; then
+		die "Must give cluster name"
+	fi
+}
+
+opts_delete() {
+	local ME="${ME} ${COMMAND}"
+	local USAGE="[-h |--help] <cluster-name>"
+	local LONGUSAGE="\t-h, --help\n\t\tPrint this help message
+\t<cluster-name>\n\t\tName of cluster to delete
+
+\tDelete a cluster
+"
+	local SUBARGS=""
+	SUBARGS=`getopt -o h --long help -n "${ME}" -- "$@"`
+	if [ $? != 0 ] ; then
+		usage "invalid arguments"
+	fi
+	eval set -- "$SUBARGS"
+
+	while true ; do
+		case "$1" in
+			-h|--help) usage; shift ;;
+			--) shift ; break ;;
+			* ) usage "Invalid argument $1" ;;
+		esac
+	done
+	CNAME="${1}"
+	if [ -z "${CNAME}" ]; then
+		die "Must give cluster name"
+	fi
+}
+
+opts_rename() {
+	local ME="${ME} ${COMMAND}"
+	local USAGE="[-h |--help] <old-cluster-name> <new-cluster-name>"
+	local LONGUSAGE="\t-h, --help\n\t\tPrint this help message
+\t<old-cluster-name>\n\t\tName of cluster to rename
+\t<new-cluster-name>\n\t\tNew name for cluster
+
+\tRename a cluster
+"
+	local SUBARGS=""
+	SUBARGS=`getopt -o h --long help -n "${ME}" -- "$@"`
+	if [ $? != 0 ] ; then
+		usage "invalid arguments"
+	fi
+	eval set -- "$SUBARGS"
+
+	while true ; do
+		case "$1" in
+			-h|--help) usage; shift ;;
+			--) shift ; break ;;
+			* ) usage "Invalid argument $1" ;;
+		esac
+	done
+	CNAME="${1}"
+	NEWCNAME="${2}"
+	if [ -z "${NEWCNAME}" ]; then
+		die "Must give old an new cluster names"
+	fi
+}
+
+opts_boot() {
+	local ME="${ME} ${COMMAND}"
+	local USAGE="[-h |--help] <cluster-name>"
+	local LONGUSAGE="\t-h, --help\n\t\tPrint this help message
+\t<cluster-name>\n\t\tName of cluster to boot
+
+\tBoot any boxes in a cluster not already running.  Virtual networks are brought up, if they're not already up.
+"
+	local SUBARGS=""
+	SUBARGS=`getopt -o h --long help -n "${ME}" -- "$@"`
+	if [ $? != 0 ] ; then
+		usage "invalid arguments"
+	fi
+	eval set -- "$SUBARGS"
+
+	while true ; do
+		case "$1" in
+			-h|--help) usage; shift ;;
+			--) shift ; break ;;
+			* ) usage "Invalid argument $1" ;;
+		esac
+	done
+	CNAME="${1}"
+	if [ -z "${CNAME}" ]; then
+		die "Must give cluster name"
+	fi
+}
+
+opts_halt() {
+	local ME="${ME} ${COMMAND}"
+	local USAGE="[-h |--help] <cluster-name>"
+	local LONGUSAGE="\t-h, --help\n\t\tPrint this help message
+\t<cluster-name>\n\t\tName of cluster to halt
+
+\tHalt any boxes in a cluster that are running, and tear down private networks
+"
+	local SUBARGS=""
+	SUBARGS=`getopt -o h --long help -n "${ME}" -- "$@"`
+	if [ $? != 0 ] ; then
+		usage "invalid arguments"
+	fi
+	eval set -- "$SUBARGS"
+
+	while true ; do
+		case "$1" in
+			-h|--help) usage; shift ;;
+			--) shift ; break ;;
+			* ) usage "Invalid argument $1" ;;
+		esac
+	done
+	CNAME="${1}"
+	if [ -z "${CNAME}" ]; then
+		die "Must give cluster name"
+	fi
+}
+
+# Now get the subcommand.  It will be in $1.
+COMMAND=$1; shift
+case "${COMMAND}" in
+	"create")	opts_create "$@" ;;
+	"delete")	opts_delete "$@" ;;
+	"rename")	opts_rename "$@" ;;
+	"info")		opts_info "$@" ;;
+	"boot")		opts_boot "$@" ;;
+	"halt")		opts_halt "$@" ;;
+	"") usage "Must give a command" ;;
+	* ) usage "Unknown command ${COMMAND}" ;;
+esac
+
 pinfo_detail() {
 	local cdir="${CDIR}"
 	if [ ! -d "${CDIR}" ]; then
@@ -96,7 +318,7 @@ pinfo_detail() {
 	done
 	echo -e "\tNetworks:"
 	for net in ${VIRSH_NETS}; do
-		uuid=$(virsh net-info ${net} | grep UUID)
+		uuid=$(${VIRSH} net-info ${net} | grep UUID)
 		echo -e "\t\tName:\t${net}"
 		echo -e "\t\t${uuid}"
 		echo -e "\t\tActive:\t\t${NET_STATE[${net}]}"
@@ -119,7 +341,7 @@ cmd_exists() {
 }
 
 # Command functions
-cluster_create() {
+cmd_create() {
 	if [ -d "${CDIR}" ]; then
 		die "cannot create cluster ${CNAME}: directory exists"
 	elif [ -n "${VIRSH_BOXES}" ]; then
@@ -149,8 +371,8 @@ cluster_create() {
 		NETBYTE=$((${net} + 20))
 		sed -i -e "s#CLUSTERNAME#${CNAME}#" -e "s#NETNUM#${net}#" -e "s#NETBYTE#${NETBYTE}#" -e "s#CBYTES#${CBYTES}#" "${NNAME}"
 
-		virsh net-define "${NNAME}" || die "Couldn't create ${NNAME}"
-		virsh net-start "${CNAME}-n${net}" || die "Couldn't start ${CNAME}-n${net}"
+		${VIRSH} net-define "${NNAME}" || die "Couldn't create ${NNAME}"
+		${VIRSH} net-start "${CNAME}-n${net}" || die "Couldn't start ${CNAME}-n${net}"
 	done
 
 	for BNUM in $(seq -f '%02.0f' ${NUMBOXES}); do
@@ -170,29 +392,29 @@ cluster_create() {
 		for vblock in $(seq -f '%02.0f' ${NUMVBLOCKS}); do
 			SLOTNUM=$((${vblock} + 20))
 			VDEV=$(echo "${VDEV}" | tr "a-z" "b-z")
-			NVBLOCK=$(sed -e "s#VNUM#${vblock}#" -e "s#CLUSTERNAME#${CNAME}#" -e "s#CDIR#$CDIR#" -e "s#BNUM#${BNUM}#" -e "s#SLOTNUM#${SLOTNUM}#" -e "s#VDEV#vd${VDEV}#" "${IDIR}/${IMGBASE}-vblock-template.xml" | sed '{:q;N;s/\n/\\n/g;t q}')
+			NVBLOCK=$(sed -e "s#VNUM#${vblock}#" -e "s#CLUSTERNAME#${CNAME}#" -e "s#CDIR#$CDIR#" -e "s#BNUM#${BNUM}#" -e "s#SLOTNUM#${SLOTNUM}#" -e "s#VDEV#sd${VDEV}#" "${IDIR}/${IMGBASE}-vblock-template.xml" | sed '{:q;N;s/\n/\\n/g;t q}')
 			VBLOCKS+="${NVBLOCK}\n"
 			qemu-img create -f raw "${CDIR}/${CNAME}-box${BNUM}-vblock${vblock}.img" "${VBLOCK_SIZE}"
 		done
 
-		sed -i -e "s#CLUSTERNAME#${CNAME}#" -e "s#BNUM#${BNUM}#" -e "s#CDIR#$CDIR#" -e "s#CBYTES#${CBYTES}#" -e "s#IFACES#${IFACES}#" -e "s#VBLOCKS#${VBLOCKS}#" ${DNAME}
-		virsh define "${DNAME}" || die "Couldn't define ${DNAME}"
+		sed -i -e "s#CLUSTERNAME#${CNAME}#" -e "s#BNUM#${BNUM}#" -e "s#CDIR#$CDIR#" -e "s#CBYTES#${CBYTES}#" -e "s#IFACES#${IFACES}#" -e "s#VBLOCKS#${VBLOCKS}#" -e "s#VCPU#${VCPU}#" -e "s#VMEM#${VMEM}#" ${DNAME}
+		${VIRSH} define "${DNAME}" || die "Couldn't define ${DNAME}"
 	done
 
 	echo "Cluster ${CNAME} complete."
 }
 
-cluster_delete() {
+cmd_delete() {
 	# Always try and delete cluster, so left-over parts can be nuked
 	pinfo "Deleting"
 
 	for box in ${VIRSH_BOXES}; do
-		virsh destroy ${box} > /dev/null 2>&1
-		virsh undefine ${box} || die "Failed to undefine ${box}"
+		${VIRSH} destroy ${box} > /dev/null 2>&1
+		${VIRSH} undefine ${box} || die "Failed to undefine ${box}"
 	done
 	for net in ${VIRSH_NETS}; do
-		virsh net-destroy ${net} || die "Failed to destroy ${net}"
-		virsh net-undefine ${net}  > /dev/null 2>&1 # may have been non-persistant
+		${VIRSH} net-destroy ${net} || die "Failed to destroy ${net}"
+		${VIRSH} net-undefine ${net}  > /dev/null 2>&1 # may have been non-persistant
 	done
 	if [ -d "${CDIR}" ]; then
 		rm -rf "${CDIR}" || die "Failed to remove ${CDIR}"
@@ -200,7 +422,7 @@ cluster_delete() {
 	exit
 }
 
-cluster_rename() {
+cmd_rename() {
 	if [ -z "${NEWCNAME}" ]; then
 		usage "--rename requires a new cluster name"
 	elif [ ! -d "${CDIR}" ]; then
@@ -215,7 +437,7 @@ cluster_rename() {
 
 	# Power them all down
 	for box in ${VIRSH_BOXES}; do
-		virsh destroy ${box} > /dev/null 2>&1
+		${VIRSH} destroy ${box} > /dev/null 2>&1
 	done
 
 	# Move dir, rename files
@@ -233,9 +455,9 @@ cluster_rename() {
 			oldfbase=${net/${CNAME}-n/${CNAME}-net}
 			newfbase=${newnet/${NEWCNAME}-n/${NEWCNAME}-net}
 		fi
-		virsh net-dumpxml ${net} > "${TDIR}/${newnet}.xml" || die "Failed to dump ${net}"
-		virsh net-destroy ${net} || die "Failed to destroy ${net}"
-		virsh net-undefine ${net}  > /dev/null 2>&1 # may have been non-persistant
+		${VIRSH} net-dumpxml ${net} > "${TDIR}/${newnet}.xml" || die "Failed to dump ${net}"
+		${VIRSH} net-destroy ${net} || die "Failed to destroy ${net}"
+		${VIRSH} net-undefine ${net}  > /dev/null 2>&1 # may have been non-persistant
 		sudo mv "${newdir}/${oldfbase}.xml" "${newdir}/${newfbase}.xml"
 		for f in "${TDIR}/${newnet}.xml" "${newdir}/${newfbase}.xml"; do
 			sed -i  -e "s#<name>${net}</name>#<name>${newnet}</name>#g" \
@@ -243,8 +465,8 @@ cluster_rename() {
 				-e "s#pnet#n#g" \
 				"${f}"
 		done
-		virsh net-define "${TDIR}/${newnet}.xml" || die "Couldn't create ${newnet}"
-		virsh net-start "${newnet}" || die "Couldn't start ${newnet}"
+		${VIRSH} net-define "${TDIR}/${newnet}.xml" || die "Couldn't create ${newnet}"
+		${VIRSH} net-start "${newnet}" || die "Couldn't start ${newnet}"
 	done
 
 	# Rename boxes
@@ -252,8 +474,8 @@ cluster_rename() {
 		newbox=${box/${CNAME}/${NEWCNAME}}
 		oldfbase=${box/${CNAME}-/${CNAME}-box}
 		newfbase=${newbox/${NEWCNAME}-/${NEWCNAME}-box}
-		virsh dumpxml ${box} > "${TDIR}/${newbox}.xml" || die "Failed to dump ${box}"
-		virsh undefine ${box} || die "Failed to destroy ${box}"
+		${VIRSH} dumpxml ${box} > "${TDIR}/${newbox}.xml" || die "Failed to dump ${box}"
+		${VIRSH} undefine ${box} || die "Failed to destroy ${box}"
 		sudo mv "${newdir}/${oldfbase}.img" "${newdir}/${newfbase}.img"
 		sudo mv "${newdir}/${oldfbase}.xml" "${newdir}/${newfbase}.xml"
 		for f in "${TDIR}/${newbox}.xml" "${newdir}/${newfbase}.xml"; do
@@ -263,7 +485,7 @@ cluster_rename() {
 				-e "s#pnet#n#g" \
 				"${f}"
 		done
-		virsh define "${TDIR}/${newbox}.xml" || die "Couldn't create ${newbox}"
+		${VIRSH} define "${TDIR}/${newbox}.xml" || die "Couldn't create ${newbox}"
 	done
 
 	rm -rf "${TDIR}"
@@ -271,119 +493,57 @@ cluster_rename() {
 	echo "Renamed cluster ${CNAME} to ${NEWCNAME}"
 }
 
-cluster_info() {
+cmd_info() {
 	pinfo_detail "Info on"
 }
 
-cluster_boot() {
+cmd_boot() {
 	if [ -z "${VIRSH_BOXES}" ]; then
 		die "cannot boot cluster ${CNAME}: VMs do not exist"
 	fi
 	pinfo "Booting"
 	for net in ${VIRSH_NETS}; do
 		if [ "${NET_STATE[${net}]}" == "no" ]; then
-			virsh net-start ${net} || die "Failed to start ${net}"
+			${VIRSH} net-start ${net} || die "Failed to start ${net}"
 		fi
 	done
 	for box in ${VIRSH_BOXES}; do
 		if [ "${BOX_STATE[${box}]}" == "halted" ]; then
-			virsh start ${box} || die "Failed to boot ${box}"
+			${VIRSH} start ${box} || die "Failed to boot ${box}"
 		fi
 	done
 }
 
-cluster_halt() {
+cmd_halt() {
 	if [ -z "${VIRSH_BOXES}" ]; then
 		die "cannot halt cluster ${CNAME}: VMs do not exist"
 	fi
 	pinfo "Halting"
 	for box in ${VIRSH_BOXES}; do
 		if [ "${BOX_STATE[${box}]}" == "running" ]; then
-			virsh shutdown ${box} || die "Failed to halt ${box}"
+			${VIRSH} shutdown ${box} || die "Failed to halt ${box}"
 		fi
 	done
 	for net in ${VIRSH_NETS}; do
 		if [ "${NET_STATE[${net}]}" == "yes" ]; then
-			virsh net-destroy ${net} || die "Failed to stop ${net}"
+			${VIRSH} net-destroy ${net} || die "Failed to stop ${net}"
 		fi
 	done
 }
 
-# Script name
-ME=$(basename $0)
-
-# Parse arguments
-ARGS=`getopt -o hb:t:m:n:i:c:d:r:B:H:v: --long help,base-directory:,target-directory:,machine-count:,network-count:,vblock-count:,info:,create:,delete:,rename:,boot:,halt: -n "${ME}" -- "$@"`
-
-if [ $? != 0 ] ; then
-	usage "invalid arguments"
-fi
-eval set -- "$ARGS"
-
-while true ; do
-	case "$1" in
-		-h|--help) usage; shift ;;
-		-b|--base-directory) IMGBASE=$2 ; shift 2 ;;
-		-t|--target-directory) CDIR=$2 ; shift 2 ;;
-		-m|--machine-count) NUMBOXES=$2 ; shift 2 ;;
-		-n|--network-count) NUMNETS=$2 ; shift 2 ;;
-		-v|--vblock-count) NUMVBLOCKS=$2 ; shift 2 ;;
-		-i|--info) setcommand "info" $2; shift 2;;
-		-c|--create) setcommand "create" $2; shift 2;;
-		-d|--delete) setcommand "delete" $2; shift 2;;
-		-r|--rename) setcommand "rename" $2; shift 2;;
-		-B|--boot) setcommand "boot" $2; shift 2;;
-		-H|--halt) setcommand "halt" $2; shift 2;;
-		--) shift ; break ;;
-		* ) usage "Invalid argument $1";;
-	esac
-done
-
-# Remaining arguments are in $1, $2, etc. as normal
-
-# Argument checking
-case "${COMMAND}" in
-	"create")
-		;;
-	"delete")
-		;;
-	"rename")
-		if [ -z "$1" ]; then
-			usage "--rename requires two parameters"
-		fi
-		NEWCNAME=$1
-		;;
-	"info")
-		;;
-	"boot")
-		;;
-	"halt")
-		;;
-	"unset")
-		if [ -z "$1" ]; then
-			usage
-		fi
-		setcommand "info" $1
-		;;
-	* ) usage "Unknown command ${COMMAND}";;
-esac
-
 if [ -z "${CDIR}" ]; then
 	CDIR="${BASEDIR}/${CBASE}/${CNAME}"
 fi
-IDIR=$(readlink -f "${IMGBASE}")
-IMGBASE=$(basename "${IDIR}")
-
-if [ ! -d "${BASEDIR}/${CBASE}" ]; then
-	die "Could not find cluster base directory: ${BASEDIR}/${CBASE}"
-elif [ ! -d "${IDIR}" ]; then
-	die "Could not find image base directory: ${IDIR}"
+if [ -z "${IDIR}" ]; then
+	IDIR="${BASEDIR}/BASEDIR"
 fi
 
 cmd_exists virsh
+VIRSH="virsh -c ${VURI}"
+
 #IFS=', ' read -a VIRSH_BOXES <<< "$string"
-VIRSH_BOXES=$(virsh list --all | egrep "${CNAME}-[0-9]" | awk '{printf "%s ", $2}')
-running=$(virsh list --state-running | egrep "${CNAME}-[0-9]" | awk '{printf "%s ", $2}')
+VIRSH_BOXES=$(${VIRSH} list --all | egrep "${CNAME}-[0-9]" | awk '{printf "%s ", $2}')
+running=$(${VIRSH} list --state-running | egrep "${CNAME}-[0-9]" | awk '{printf "%s ", $2}')
 declare -A BOX_STATE
 for box in ${VIRSH_BOXES}; do
 	is_running="halted"
@@ -395,8 +555,8 @@ for box in ${VIRSH_BOXES}; do
 	done
 	BOX_STATE[$box]=${is_running}
 done
-VIRSH_NETS=$(virsh net-list --all | egrep "(${CNAME}-pnet[0-9])|(${CNAME}-n[0-9])" | awk '{printf "%s ", $1}')
-running=$(virsh net-list | egrep "(${CNAME}-pnet[0-9])|(${CNAME}-n[0-9])" | awk '{printf "%s ", $1}')
+VIRSH_NETS=$(${VIRSH} net-list --all | egrep "(${CNAME}-pnet[0-9])|(${CNAME}-n[0-9])" | awk '{printf "%s ", $1}')
+running=$(${VIRSH} net-list | egrep "(${CNAME}-pnet[0-9])|(${CNAME}-n[0-9])" | awk '{printf "%s ", $1}')
 declare -A NET_STATE
 for net in ${VIRSH_NETS}; do
 	is_running="no"
@@ -408,26 +568,15 @@ for net in ${VIRSH_NETS}; do
 	done
 	NET_STATE[$net]=${is_running}
 done
-# Check parameters
+
+# Run command
 case "${COMMAND}" in
-	"create")
-		cluster_create
-		;;
-	"delete")
-		cluster_delete
-		;;
-	"rename")
-		cluster_rename
-		;;
-	"info")
-		cluster_info
-		;;
-	"boot")
-		cluster_boot
-		;;
-	"halt")
-		cluster_halt
-		;;
+	"create")	cmd_create ;;
+	"delete")	cmd_delete ;;
+	"rename")	cmd_rename ;;
+	"info")		cmd_info ;;
+	"boot")		cmd_boot ;;
+	"halt")		cmd_halt ;;
 	* ) usage "Unknown command ${COMMAND}";;
 esac
 

@@ -2,6 +2,5 @@
       <mac address='52:54:00CBYTES:BNUM'/>
       <source network='CLUSTERNAME-nNETNUM'/>
       <target dev='vnetNETNUM'/>
-      <alias name='netNETNUM'/>
       <address type='pci' domain='0x0000' bus='0x00' slot='0xSLOTNUM' function='0x0'/>
     </interface>
