@@ -25,17 +25,19 @@ fi
 
 CBASE="clusters"
 IMGBASE="BASEIMG"
+BASENAME="fedora-base"
+VOLGRP="fedora"
 NUMBOXES=2
 NUMNETS=2
 NUMVBLOCKS=1
 VBLOCK_SIZE="20G"
 VCPU="2"
-VMEM="8388608"
+VMEMGB="8"
 VURI="qemu:///system"
 
 # Set global usage output
 DESCRIPTION="Control a KVM-based cluster"
-USAGE="[-h |--help] [-V | --verbose] [-c <cluster-dir> | --cluster-directory=<cluster-dir>] (info | create | delete | rename | boot | halt)"
+USAGE="[-h |--help] [-V | --verbose] [-b <base-dir> | --base-directory=<base-dir>] [-c <cluster-dir> | --cluster-directory=<cluster-dir>] (info | create | delete | rename | boot | halt)"
 LONGUSAGE="Common options:
 \t-h, --help\n\t\tPrint this help message
 \t-V, --verbose\n\t\tBe verbose
@@ -54,9 +56,46 @@ LONGUSAGE="Common options:
 "
 
 # Standard functions
+# if is_interactive; then echo "interactive" fi
+#
+# Check for an interactive shell
+is_interactive() {
+	case $- in
+		*i*)
+			# Don't die in interactive shells
+			return 0
+			;;
+		*)
+			return 1
+			;;
+	esac
+}
+
+# if can_die; then exit
+#
+# Check to see if it's legal to exit during die
+can_die() {
+	if (( BASH_SUBSHELL > 0 )); then
+		return 0
+	fi
+	if ! is_interactive; then
+		return 0
+	fi
+	return 1
+}
+
+# In a function:
+# command || die "message" || return 1
+# Outside a function:
+# command || die "message"
+#
+# Print a message and exit with failure
 die() {
-	echo "$@"
-	exit 1
+	echo -e "Failed: $1" >&2
+	if can_die; then
+		exit 1
+	fi
+	return 1
 }
 
 usage() {
@@ -144,18 +183,20 @@ opts_info() {
 
 opts_create() {
 	local ME="${ME} ${COMMAND}"
-	local USAGE="[-h |--help] -i [<image-directory> | --image-directory=<image-directory>] [-m <number-machines> | --machine-count=<number-machines>] [-n <number-networks> | --network-count=<number-networks>] [-v <number-vblock> | --vblock-count=<number-vblock>] <cluster-name>"
+	local USAGE="[-h |--help] [-c <number-cpus> | --cpu-count=<number-cpus>] [-i <image-directory> | --image-directory=<image-directory>] [-m <number-machines> | --machine-count=<number-machines>] [-r <ram-GB> | --ram-size=<ram-GB>] [-n <number-networks> | --network-count=<number-networks>] [-v <number-vblock> | --vblock-count=<number-vblock>] <cluster-name>"
 	local LONGUSAGE="\t-h, --help\n\t\tPrint this help message
+\t-c <number-cpus>, --cpu-count=<number-cpus>\n\t\tNumber of virtual CPUs per machine. Default: ${VCPU}
 \t-i <image-directory>, --image-directory=<image-directory>\n\t\tDirectory containing image. Default: ${BASEDIR}/BASEDIR
 \t-m <number-machines>, --machine-count=<number-machines>\n\t\tNumber of machines in cluster. Default: ${NUMBOXES}
 \t-n <number-networks>, --network-count=<number-networks>\n\t\tNumber of networks in cluster. Default: ${NUMNETS}
+\t-r <ram-GB>, --ram-size=<ram-GB>\n\t\tSize of RAM per box in GB. Default: ${VMEMGB}
 \t-v <number-vblock>, --vblock-count=<number-vblock>\n\t\tNumber of extra virtual block devices. Default: ${NUMVBLOCKS}
 \t<cluster-name>\n\t\tName of cluster to create.
 
 \tCreate a new cluster.  All clusters are on the public bridged network, and have a boot block device (based on the base image).  The number of boxes, private networks, and extra block devices can be configured.
 "
 	local SUBARGS=""
-	SUBARGS=`getopt -o hi:m:n:v: --long help,image-directory:,machine-count:,network-count:,vblock-count: -n "${ME}" -- "$@"`
+	SUBARGS=`getopt -o hc:i:m:n:r:v: --long help,cpu-count:,image-directory:,machine-count:,network-count:,ram-size:,vblock-count: -n "${ME}" -- "$@"`
 	if [ $? != 0 ] ; then
 		usage "invalid arguments"
 	fi
@@ -164,9 +205,11 @@ opts_create() {
 	while true ; do
 		case "$1" in
 			-h|--help) usage; shift ;;
+			-c|--cpu-count) VCPU=$2 ; shift 2 ;;
 			-i|--image-directory) IDIR=$2 ; shift 2 ;;
 			-m|--machine-count) NUMBOXES=$2 ; shift 2 ;;
 			-n|--network-count) NUMNETS=$2 ; shift 2 ;;
+			-r|--ram-size) VMEMGB=$2 ; shift 2 ;;
 			-v|--vblock-count) NUMVBLOCKS=$2 ; shift 2 ;;
 			--) shift ; break ;;
 			* ) usage "Invalid argument $1" ;;
@@ -305,6 +348,63 @@ case "${COMMAND}" in
 	* ) usage "Unknown command ${COMMAND}" ;;
 esac
 
+function getloop {
+	local imgfile=$1
+	local  __resultvar=$2
+	local loop=$(losetup -l  | grep "${imgfile}" | awk '{print $1}')
+	if [[ "$__resultvar" ]]; then
+		eval $__resultvar="'$loop'"
+	else
+		echo "$loop"
+	fi
+}
+
+function kvm_mount {
+	local imgfile=${1}
+	local volgrp=${2}
+	local cdir=$(dirname ${imgfile})
+	local loop=$(getloop "${imgfile}")
+	if [ -n "${loop}" ]; then
+		die "${imgfile} is already mounted" || return 1
+	fi
+	loop=$(sudo losetup -f)
+	if [ -z "${loop}" ]; then
+		die "Cannot get a loop device" || return 1
+	fi
+
+	sudo losetup ${loop} "${imgfile}" || die "Failed to setup loop for ${imgfile}" || return 1
+
+	sudo kpartx -a ${loop} || die "Failed to initialize partition table for ${loop}" || return 1
+
+	sudo vgscan > /dev/null || die "vgscan failed" || return 1
+
+	sudo vgchange -a y > /dev/null || die "vgscan failed" || return 1
+
+	sudo vgdisplay -s | grep "\"${volgrp}\"" || die "Cannot find volume group ${volgrp}" || return 1
+
+	if [ ! -d "${cdir}/mnt" ]; then
+		sudo mkdir "${cdir}/mnt"
+	fi
+
+	sudo mount "/dev/${volgrp}/root" "${cdir}/mnt" || die "Failed to mount root" || return 1
+}
+
+function kvm_umount {
+	local imgfile=${1}
+	local volgrp=${2}
+	local cdir=$(dirname ${imgfile})
+	sudo vgdisplay -s | grep "\"${volgrp}\"" || die "Cannot find volume group ${volgrp}" || return 1
+	local loop=$(getloop "${imgfile}")
+	if [ -z "${loop}" ]; then
+		die "Image file ${imgfile} is not mounted" || return 1
+	fi
+	sudo umount "${cdir}/mnt"
+	sudo vgchange -an > /dev/null "${volgrp}"
+	sudo kpartx -d > /dev/null ${loop}
+	sudo losetup -d ${loop}
+	sudo rmdir "${cdir}/mnt"
+}
+
 pinfo_detail() {
 	local cdir="${CDIR}"
 	if [ ! -d "${CDIR}" ]; then
@@ -377,6 +477,10 @@ cmd_create() {
 
 	for BNUM in $(seq -f '%02.0f' ${NUMBOXES}); do
 		cp --sparse=always "${IDIR}/${IMGBASE}.img" "${CDIR}/${CNAME}-box${BNUM}.img"
+		kvm_mount "${CDIR}/${CNAME}-box${BNUM}.img" "${VOLGRP}" || die "Failed to mount image"
+		sudo sed -i -e "s/${BASENAME}/${CNAME}-${BNUM}/" "${CDIR}/mnt/etc/hostname"
+		sudo sed -i -e "s/HWADDR=.*$/HWADDR=52:54:00${CBYTES}:${BNUM}/" "${CDIR}/mnt/etc/sysconfig/network-scripts/ifcfg-eth0"
+		kvm_umount "${CDIR}/${CNAME}-box${BNUM}.img" "${VOLGRP}" || die "Failed to mount image"
 		DNAME="${CDIR}/${CNAME}-box${BNUM}.xml"
 		cp "${IDIR}/${IMGBASE}-box-template.xml" "${DNAME}" || die "Failed to copy XML template for ${BNUM}"
 
@@ -397,6 +501,7 @@ cmd_create() {
 			qemu-img create -f raw "${CDIR}/${CNAME}-box${BNUM}-vblock${vblock}.img" "${VBLOCK_SIZE}"
 		done
 
+		VMEM=$((${VMEMGB} * 1024 * 1024))
 		sed -i -e "s#CLUSTERNAME#${CNAME}#" -e "s#BNUM#${BNUM}#" -e "s#CDIR#$CDIR#" -e "s#CBYTES#${CBYTES}#" -e "s#IFACES#${IFACES}#" -e "s#VBLOCKS#${VBLOCKS}#" -e "s#VCPU#${VCPU}#" -e "s#VMEM#${VMEM}#" ${DNAME}
 		${VIRSH} define "${DNAME}" || die "Couldn't define ${DNAME}"
 	done
@@ -413,7 +518,7 @@ cmd_delete() {
 		${VIRSH} undefine ${box} || die "Failed to undefine ${box}"
 	done
 	for net in ${VIRSH_NETS}; do
-		${VIRSH} net-destroy ${net} || die "Failed to destroy ${net}"
+		${VIRSH} net-destroy ${net} > /dev/null 2>&1 # May not have been active
 		${VIRSH} net-undefine ${net}  > /dev/null 2>&1 # may have been non-persistant
 	done
 	if [ -d "${CDIR}" ]; then
