@@ -26,7 +26,7 @@ fi
 CBASE="clusters"
 IMGBASE="BASEIMG"
 BASENAME="fedora-base"
-VOLGRP="fedora"
+VOLGRP="vfedora"
 NUMBOXES=2
 NUMNETS=2
 NUMVBLOCKS=1
@@ -378,7 +378,7 @@ function kvm_mount {
 
 	sudo vgscan > /dev/null || die "vgscan failed" || return 1
 
-	sudo vgchange -a y > /dev/null || die "vgscan failed" || return 1
+	sudo vgchange -a y "${volgrp}" > /dev/null # Don't die - VG is checked below, and could fail for many reasons
 
 	sudo vgdisplay -s | grep "\"${volgrp}\"" || die "Cannot find volume group ${volgrp}" || return 1
 
@@ -399,8 +399,8 @@ function kvm_umount {
 		die "Image file ${imgfile} is not mounted" || return 1
 	fi
 	sudo umount "${cdir}/mnt"
-	sudo vgchange -an > /dev/null "${volgrp}"
-	sudo kpartx -d > /dev/null ${loop}
+	sudo vgchange -an "${volgrp}" > /dev/null
+	sudo kpartx -d ${loop} > /dev/null
 	sudo losetup -d ${loop}
 	sudo rmdir "${cdir}/mnt"
 }
