@@ -349,6 +349,32 @@ case "${COMMAND}" in
 	* ) usage "Unknown command ${COMMAND}" ;;
 esac
 
+# getvolgroup ${flavor} volgrp
+#
+# Get the volume group name for the given flavor
+#
+# Result will be in the local variable volgrp  Or:
+#
+# volgrp=$(getvolgroup ${flavor})
+#
+function getvolgroup {
+	local flavor=$1
+	local __resultvar=$2
+	local volgrp=""
+
+	case $1 in
+		"fedora") volgrp="vfedora" ;;
+		"rhel-atomic") volgrp="rhelah" ;;
+		*) volgrp="unknown" ;;
+	esac
+
+	if [[ "$__resultvar" ]]; then
+		eval $__resultvar="'$volgrp'"
+	else
+		echo "$volgrp"
+	fi
+}
+
 function getloop {
 	local imgfile=$1
 	local  __resultvar=$2
@@ -475,7 +501,7 @@ cmd_create() {
 	echo -e "\tMAC bytes: ${CBYTES}"
 
 	local basename="${FLAVOR}-base"
-	local volgrp="v${FLAVOR}"
+	local volgrp=$(getvolgroup "${FLAVOR}")
 
 	mkdir -p "${CDIR}" || die "failed to create ${CDIR}"
 
@@ -488,7 +514,7 @@ cmd_create() {
 		sed -i -e "s#CLUSTERNAME#${CNAME}#" -e "s#NETNUM#${net}#" -e "s#NETBYTE#${NETBYTE}#" -e "s#CBYTES#${CBYTES}#" "${NNAME}"
 
 		${VIRSH} net-define "${NNAME}" || die "Couldn't create ${NNAME}"
-		${VIRSH} net-start "${CNAME}-n${net}" || die "Couldn't start ${CNAME}-n${net}"
+		#${VIRSH} net-start "${CNAME}-n${net}" || die "Couldn't start ${CNAME}-n${net}"
 	done
 
 	for BNUM in $(seq -f '%02.0f' ${NUMBOXES}); do
