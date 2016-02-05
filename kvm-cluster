@@ -4,7 +4,8 @@
 #
 # Directory layout:
 # <base>/			- Base directory for clusters.  Lots of storage space recommended
-#       /BASEIMG/		- Directory containing the base image file and XML templates
+#       /BASEIMG/		- Directory containing the flavor directories
+#       /BASEIMG/<flavor>	- Directory containing the image file and XML templates for <flavor>
 #       /clusters/		- Directory containing instantiated cluster
 #                /<cname>	- Cluster dir; contains the disk image, and XML used to create the cluster
 #
@@ -24,9 +25,7 @@ else
 fi
 
 CBASE="clusters"
-IMGBASE="BASEIMG"
-BASENAME="fedora-base"
-VOLGRP="vfedora"
+FLAVOR="fedora"
 NUMBOXES=2
 NUMNETS=2
 NUMVBLOCKS=1
@@ -183,10 +182,11 @@ opts_info() {
 
 opts_create() {
 	local ME="${ME} ${COMMAND}"
-	local USAGE="[-h |--help] [-c <number-cpus> | --cpu-count=<number-cpus>] [-i <image-directory> | --image-directory=<image-directory>] [-m <number-machines> | --machine-count=<number-machines>] [-r <ram-GB> | --ram-size=<ram-GB>] [-n <number-networks> | --network-count=<number-networks>] [-v <number-vblock> | --vblock-count=<number-vblock>] <cluster-name>"
+	local USAGE="[-h |--help] [-c <number-cpus> | --cpu-count=<number-cpus>] [-f <flavor> | --flavor=<flavor>] [-i <image-directory> | --image-directory=<image-directory>] [-m <number-machines> | --machine-count=<number-machines>] [-r <ram-GB> | --ram-size=<ram-GB>] [-n <number-networks> | --network-count=<number-networks>] [-v <number-vblock> | --vblock-count=<number-vblock>] <cluster-name>"
 	local LONGUSAGE="\t-h, --help\n\t\tPrint this help message
 \t-c <number-cpus>, --cpu-count=<number-cpus>\n\t\tNumber of virtual CPUs per machine. Default: ${VCPU}
-\t-i <image-directory>, --image-directory=<image-directory>\n\t\tDirectory containing image. Default: ${BASEDIR}/BASEDIR
+\t-f <flavor>, --flavor=<flavor>\n\t\tFlavor to install.  Default: ${FLAVOR}
+\t-i <image-directory>, --image-directory=<image-directory>\n\t\tDirectory containing image flavors. Default: ${BASEDIR}/BASEDIR
 \t-m <number-machines>, --machine-count=<number-machines>\n\t\tNumber of machines in cluster. Default: ${NUMBOXES}
 \t-n <number-networks>, --network-count=<number-networks>\n\t\tNumber of networks in cluster. Default: ${NUMNETS}
 \t-r <ram-GB>, --ram-size=<ram-GB>\n\t\tSize of RAM per box in GB. Default: ${VMEMGB}
@@ -206,6 +206,7 @@ opts_create() {
 		case "$1" in
 			-h|--help) usage; shift ;;
 			-c|--cpu-count) VCPU=$2 ; shift 2 ;;
+			-f|--flavor) FLAVOR=$2 ; shift 2 ;;
 			-i|--image-directory) IDIR=$2 ; shift 2 ;;
 			-m|--machine-count) NUMBOXES=$2 ; shift 2 ;;
 			-n|--network-count) NUMNETS=$2 ; shift 2 ;;
@@ -410,7 +411,12 @@ pinfo_detail() {
 	if [ ! -d "${CDIR}" ]; then
 		cdir="${CDIR} (does not exist)"
 	fi
+	local flavor="unknown"
+	if [ -f "${CDIR}/flavor" ]; then
+		flavor=$(cat "${CDIR}/flavor")
+	fi
 	echo "$@ cluster ${CNAME}:"
+	echo -e "\tFlavor: ${flavor}"
 	echo -e "\tDirectory: ${cdir}"
 	echo -e "\tBoxes:"
 	for box in ${VIRSH_BOXES}; do
@@ -429,7 +435,12 @@ pinfo() {
 	if [ ! -d "${CDIR}" ]; then
 		cdir="${CDIR} (does not exist)"
 	fi
+	local flavor="unknown"
+	if [ -f "${CDIR}/flavor" ]; then
+		flavor=$(cat "${CDIR}/flavor")
+	fi
 	echo "$@ cluster ${CNAME}:"
+	echo -e "\tFlavor: ${flavor}"
 	echo -e "\tBoxes: ${VIRSH_BOXES}"
 	echo -e "\tNetworks: ${VIRSH_NETS}"
 }
@@ -457,17 +468,22 @@ cmd_create() {
 	echo "Creating cluster ${CNAME}:"
 	echo -e "\tDirectory: ${CDIR}"
 	echo -e "\tImage Directroy: ${IDIR}"
-	echo -e "\tImage Basename: ${IMGBASE}"
+	echo -e "\tFlavor: ${FLAVOR}"
 	echo -e "\tNumber of boxes: ${NUMBOXES}"
 	echo -e "\tNumber of networks: ${NUMNETS}"
 	echo -e "\tNumber of virtual block devices: ${NUMVBLOCKS}"
 	echo -e "\tMAC bytes: ${CBYTES}"
 
+	local basename="${FLAVOR}-base"
+	local volgrp="v${FLAVOR}"
+
 	mkdir -p "${CDIR}" || die "failed to create ${CDIR}"
+
+	echo "${FLAVOR}" > "${CDIR}/flavor"
 
 	for net in $(seq -f '%02.0f' 1 ${NUMNETS}); do
 		NNAME="${CDIR}/${CNAME}-net${net}.xml"
-		cp "${IDIR}/${IMGBASE}-net-template.xml" "${NNAME}" || die "Failed to copy XML template for ${BNUM}"
+		cp "${IDIR}/${FLAVOR}/net-template.xml" "${NNAME}" || die "Failed to copy XML template for ${BNUM}"
 		NETBYTE=$((${net} + 20))
 		sed -i -e "s#CLUSTERNAME#${CNAME}#" -e "s#NETNUM#${net}#" -e "s#NETBYTE#${NETBYTE}#" -e "s#CBYTES#${CBYTES}#" "${NNAME}"
 
@@ -476,18 +492,18 @@ cmd_create() {
 	done
 
 	for BNUM in $(seq -f '%02.0f' ${NUMBOXES}); do
-		cp --sparse=always "${IDIR}/${IMGBASE}.img" "${CDIR}/${CNAME}-box${BNUM}.img"
-		kvm_mount "${CDIR}/${CNAME}-box${BNUM}.img" "${VOLGRP}" || die "Failed to mount image"
-		sudo sed -i -e "s/${BASENAME}/${CNAME}-${BNUM}/" "${CDIR}/mnt/etc/hostname"
+		cp --sparse=always "${IDIR}/${FLAVOR}/box.img" "${CDIR}/${CNAME}-box${BNUM}.img" || die "Failed to copy image"
+		kvm_mount "${CDIR}/${CNAME}-box${BNUM}.img" "${volgrp}" || die "Failed to mount image"
+		sudo sed -i -e "s/${basename}/${CNAME}-${BNUM}/" "${CDIR}/mnt/etc/hostname"
 		sudo sed -i -e "s/HWADDR=.*$/HWADDR=52:54:00${CBYTES}:${BNUM}/" "${CDIR}/mnt/etc/sysconfig/network-scripts/ifcfg-eth0"
-		kvm_umount "${CDIR}/${CNAME}-box${BNUM}.img" "${VOLGRP}" || die "Failed to mount image"
+		kvm_umount "${CDIR}/${CNAME}-box${BNUM}.img" "${volgrp}" || die "Failed to mount image"
 		DNAME="${CDIR}/${CNAME}-box${BNUM}.xml"
-		cp "${IDIR}/${IMGBASE}-box-template.xml" "${DNAME}" || die "Failed to copy XML template for ${BNUM}"
+		cp "${IDIR}/${FLAVOR}/box-template.xml" "${DNAME}" || die "Failed to copy XML template for ${BNUM}"
 
 		IFACES=""
 		for net in $(seq -f '%02.0f' ${NUMNETS}); do
 			SLOTNUM=$((${net} + 10))
-			NIFACE=$(sed -e "s#NETNUM#${net}#" -e "s#CLUSTERNAME#${CNAME}#" -e "s#BNUM#${BNUM}#" -e "s#SLOTNUM#${SLOTNUM}#" -e "s#CBYTES#${CBYTES}#" "${IDIR}/${IMGBASE}-iface-template.xml" | sed '{:q;N;s/\n/\\n/g;t q}')
+			NIFACE=$(sed -e "s#NETNUM#${net}#" -e "s#CLUSTERNAME#${CNAME}#" -e "s#BNUM#${BNUM}#" -e "s#SLOTNUM#${SLOTNUM}#" -e "s#CBYTES#${CBYTES}#" "${IDIR}/${FLAVOR}/iface-template.xml" | sed '{:q;N;s/\n/\\n/g;t q}')
 			IFACES+="${NIFACE}\n"
 		done
 
@@ -496,7 +512,7 @@ cmd_create() {
 		for vblock in $(seq -f '%02.0f' ${NUMVBLOCKS}); do
 			SLOTNUM=$((${vblock} + 20))
 			VDEV=$(echo "${VDEV}" | tr "a-z" "b-z")
-			NVBLOCK=$(sed -e "s#VNUM#${vblock}#" -e "s#CLUSTERNAME#${CNAME}#" -e "s#CDIR#$CDIR#" -e "s#BNUM#${BNUM}#" -e "s#SLOTNUM#${SLOTNUM}#" -e "s#VDEV#sd${VDEV}#" "${IDIR}/${IMGBASE}-vblock-template.xml" | sed '{:q;N;s/\n/\\n/g;t q}')
+			NVBLOCK=$(sed -e "s#VNUM#${vblock}#" -e "s#CLUSTERNAME#${CNAME}#" -e "s#CDIR#$CDIR#" -e "s#BNUM#${BNUM}#" -e "s#SLOTNUM#${SLOTNUM}#" -e "s#VDEV#sd${VDEV}#" "${IDIR}/${FLAVOR}/vblock-template.xml" | sed '{:q;N;s/\n/\\n/g;t q}')
 			VBLOCKS+="${NVBLOCK}\n"
 			qemu-img create -f raw "${CDIR}/${CNAME}-box${BNUM}-vblock${vblock}.img" "${VBLOCK_SIZE}"
 		done
