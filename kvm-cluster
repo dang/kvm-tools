@@ -217,7 +217,7 @@ opts_create() {
 \tCreate a new cluster.  All clusters are on the public bridged network, and have a boot block device (based on the base image).  The number of boxes, private networks, and extra block devices can be configured.
 "
 	local SUBARGS=""
-	SUBARGS=`getopt -o hc:i:m:n:r:v: --long help,cpu-count:,image-directory:,machine-count:,network-count:,ram-size:,vblock-count: -n "${ME}" -- "$@"`
+	SUBARGS=`getopt -o hc:f:i:m:n:r:v: --long help,cpu-count:,flavor:,image-directory:,machine-count:,network-count:,ram-size:,vblock-count: -n "${ME}" -- "$@"`
 	if [ $? != 0 ] ; then
 		usage "invalid arguments"
 	fi
