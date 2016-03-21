@@ -827,8 +827,8 @@ cmd_exists virsh
 VIRSH="virsh -c ${VURI}"
 
 #IFS=', ' read -a VIRSH_BOXES <<< "$string"
-VIRSH_BOXES=$(${VIRSH} list --all | egrep "${CNAME}-[0-9]" | awk '{printf "%s ", $2}')
-running=$(${VIRSH} list --state-running | egrep "${CNAME}-[0-9]" | awk '{printf "%s ", $2}')
+VIRSH_BOXES=$(${VIRSH} list --all | egrep "\<${CNAME}-[0-9]" | awk '{printf "%s ", $2}')
+running=$(${VIRSH} list --state-running | egrep "\<${CNAME}-[0-9]" | awk '{printf "%s ", $2}')
 declare -A BOX_STATE
 for box in ${VIRSH_BOXES}; do
 	is_running="halted"
@@ -840,8 +840,8 @@ for box in ${VIRSH_BOXES}; do
 	done
 	BOX_STATE[$box]=${is_running}
 done
-VIRSH_NETS=$(${VIRSH} net-list --all | egrep "(${CNAME}-pnet[0-9])|(${CNAME}-n[0-9])" | awk '{printf "%s ", $1}')
-running=$(${VIRSH} net-list | egrep "(${CNAME}-pnet[0-9])|(${CNAME}-n[0-9])" | awk '{printf "%s ", $1}')
+VIRSH_NETS=$(${VIRSH} net-list --all | egrep "(\<${CNAME}-pnet[0-9])|(\<${CNAME}-n[0-9])" | awk '{printf "%s ", $1}')
+running=$(${VIRSH} net-list | egrep "(\<${CNAME}-pnet[0-9])|(\<${CNAME}-n[0-9])" | awk '{printf "%s ", $1}')
 declare -A NET_STATE
 for net in ${VIRSH_NETS}; do
 	is_running="no"
