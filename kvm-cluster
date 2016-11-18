@@ -10,10 +10,11 @@
 #                /<cname>	- Cluster dir; contains the disk image, and XML used to create the cluster
 #
 # Commands:
-# --info	- Print info about the named cluster
-# --create	- Create a new cluster with the given name and parameters
-# --delete	- Delete an existing cluster.  All boxes and networks that can be found are nuked, and the cluster directory.
-# --rename	- Rename a cluster.  This invloves deleting the virsh config (but not the disk images) and re-creating, because virsh cannot rename
+# info	- Print info about the named cluster
+# create	- Create a new cluster with the given name and parameters
+# delete	- Delete an existing cluster.  All boxes and networks that can be found are nuked, and the cluster directory.
+# rename	- Rename a cluster.  This invloves deleting the virsh config (but not the disk images) and re-creating, because virsh cannot rename
+# reset		- Reset a cluster's storage back to default.
 #
 # Environment:
 # KVM_CLUSTER_BASE	- This can hold the path to the base of the cluster tree (<base> above).  It defaults to PWD
@@ -33,10 +34,11 @@ VBLOCK_SIZE="20G"
 VCPU="2"
 VMEMGB="8"
 VURI="qemu:///system"
+FLAVORS="fedora rhel-atomic centos7"
 
 # Set global usage output
 DESCRIPTION="Control a KVM-based cluster"
-USAGE="[-h |--help] [-V | --verbose] [-b <base-dir> | --base-directory=<base-dir>] [-c <cluster-dir> | --cluster-directory=<cluster-dir>] (info | create | delete | rename | boot | halt)"
+USAGE="[-h |--help] [-V | --verbose] [-b <base-dir> | --base-directory=<base-dir>] [-c <cluster-dir> | --cluster-directory=<cluster-dir>] (info | create | delete | rename | reset | boot | halt)"
 LONGUSAGE="Common options:
 \t-h, --help\n\t\tPrint this help message
 \t-V, --verbose\n\t\tBe verbose
@@ -48,10 +50,13 @@ LONGUSAGE="Common options:
 \tcreate\n\t\tCreate a new cluster
 \tdelete\n\t\tDelete an existing cluster
 \trename\n\t\tRename an existing cluster
+\treset\n\t\tReset an existing cluster
 \tboot\n\t\tBoot any boxes in the cluster not currently running
 \thalt\n\t\tHalt any boxes in the cluster currently running
 
 \tFor more info about each command, pass --help to that command
+
+Known flavors: ${FLAVORS}
 "
 
 # Standard functions
@@ -95,6 +100,22 @@ die() {
 		exit 1
 	fi
 	return 1
+}
+
+# In a function:
+# command || die "message" "cleanupfunc" <cleanup args> || return 1
+# Outside a function:
+# command || die "message" "cleanupfunc" <cleanup args>
+#
+# Print a message and exit with failure
+die_cleanup() {
+	local message=$1
+	local cleanfunc=$1
+	shift 2
+	if [ ! -z "$(declare -F | grep "${cleanfunc}")" ]; then
+		eval ${cleanfunc} "$@"
+	fi
+	return $(die ${message})
 }
 
 usage() {
@@ -280,6 +301,38 @@ opts_rename() {
 	fi
 }
 
+opts_reset() {
+	local ME="${ME} ${COMMAND}"
+	local USAGE="[-h |--help] [-n | --no-root] [-v | --vblock ] <cluster-name>"
+	local LONGUSAGE="\t-h, --help\n\t\tPrint this help message
+\t-n, --no-root\n\t\tDon't reset root block device
+\t-v, --vblock\n\t\tReset virtual block devices as well
+\t<cluster-name>\n\t\tName of cluster to reset.
+
+\tReset a cluster
+"
+	local SUBARGS=""
+	SUBARGS=`getopt -o hvn --long help,vblock,no-root -n "${ME}" -- "$@"`
+	if [ $? != 0 ] ; then
+		usage "invalid arguments"
+	fi
+	eval set -- "$SUBARGS"
+
+	while true ; do
+		case "$1" in
+			-h|--help) usage; shift ;;
+			-n|--no-root) NOROOT="true"; shift ;;
+			-v|--vblock) RSETVBLOCK="true"; shift ;;
+			--) shift ; break ;;
+			* ) usage "Invalid argument $1" ;;
+		esac
+	done
+	CNAME="${1}"
+	if [ -z "${CNAME}" ]; then
+		die "Must give cluster name"
+	fi
+}
+
 opts_boot() {
 	local ME="${ME} ${COMMAND}"
 	local USAGE="[-h |--help] <cluster-name>"
@@ -342,6 +395,7 @@ case "${COMMAND}" in
 	"create")	opts_create "$@" ;;
 	"delete")	opts_delete "$@" ;;
 	"rename")	opts_rename "$@" ;;
+	"reset")	opts_reset "$@" ;;
 	"info")		opts_info "$@" ;;
 	"boot")		opts_boot "$@" ;;
 	"halt")		opts_halt "$@" ;;
@@ -365,6 +419,7 @@ function getvolgroup {
 	case $1 in
 		"fedora") volgrp="vfedora" ;;
 		"rhel-atomic") volgrp="rhelah" ;;
+		"centos7") volgrp="centos" ;;
 		*) volgrp="unknown" ;;
 	esac
 
@@ -386,6 +441,27 @@ function getloop {
 	fi
 }
 
+function kvm_mount_cleanup {
+	local imgfile=${1}
+	local volgrp=${2}
+	local cdir=$(dirname ${imgfile})
+	local loop=$(getloop "${imgfile}")
+
+	sudo umount "${cdir}/mnt"
+	if [ -n "${volgrp}" ]; then
+		sudo vgchange -an "${volgrp}" > /dev/null
+	fi
+
+	# Make sure vgs are cleaned up
+	sudo dmsetup remove_all
+
+	if [ -n "${loop}" ]; then
+		sudo kpartx -d ${loop} > /dev/null
+		sudo losetup -d ${loop}
+	fi
+	sudo rmdir "${cdir}/mnt"
+}
+
 function kvm_mount {
 	local imgfile=${1}
 	local volgrp=${2}
@@ -400,36 +476,46 @@ function kvm_mount {
 	fi
 
 	sudo losetup ${loop} "${imgfile}" || die "Failed to setup loop for ${imgfile}" || return 1
+	sleep 1
 
-	sudo kpartx -a ${loop} || die "Failed to initialize partition table for ${loop}" || return 1
+	sudo kpartx -a ${loop} || die_cleanup "Failed to initialize partition table for ${loop}" kvm_mount_cleanup ${imgfile} || return 1
+	sleep 1
 
-	sudo vgscan > /dev/null || die "vgscan failed" || return 1
+	sudo vgscan > /dev/null || die_cleanup "vgscan failed" kvm_mount_cleanup ${imgfile} || return 1
+	sleep 1
 
 	sudo vgchange -a y "${volgrp}" > /dev/null # Don't die - VG is checked below, and could fail for many reasons
+	sleep 1
 
-	sudo vgdisplay -s | grep "\"${volgrp}\"" || die "Cannot find volume group ${volgrp}" || return 1
+	sudo vgdisplay -s | grep "\"${volgrp}\"" || die_cleanup "Cannot find volume group ${volgrp}" kvm_mount_cleanup ${imgfile} || return 1
 
 	if [ ! -d "${cdir}/mnt" ]; then
 		sudo mkdir "${cdir}/mnt"
 	fi
 
-	sudo mount "/dev/${volgrp}/root" "${cdir}/mnt" || die "Failed to mount root" || return 1
+	sudo mount "/dev/${volgrp}/root" "${cdir}/mnt" || die_cleanup "Failed to mount root" kvm_mount_cleanup ${imgfile} ${volgrp} || return 1
 }
 
 function kvm_umount {
-	local imgfile=${1}
-	local volgrp=${2}
-	local cdir=$(dirname ${imgfile})
-	sudo vgdisplay -s | grep "\"${volgrp}\"" || die "Cannot find volume group ${volgrp}" || return 1
-	local loop=$(getloop "${imgfile}")
-	if [ -z "${loop}" ]; then
-		die "Image file ${imgfile} is not mounted" || return 1
-	fi
-	sudo umount "${cdir}/mnt"
-	sudo vgchange -an "${volgrp}" > /dev/null
-	sudo kpartx -d ${loop} > /dev/null
-	sudo losetup -d ${loop}
-	sudo rmdir "${cdir}/mnt"
+	# Use the cleanup function to avoid drift
+	kvm_mount_cleanup ${1} ${2}
+}
+
+function create_image {
+	local srcimg="${1}"
+	local dstimg="${2}"
+	local volgrp="${3}"
+	local basename="${4}"
+	local cname="${5}"
+	local bnum="${6}"
+	local cbytes="${7}"
+	local cdir=$(dirname ${dstimg})
+
+	cp --sparse=always "${srcimg}" "${dstimg}" || die "Failed to copy image"
+	kvm_mount "${dstimg}" "${volgrp}" || die "Failed to mount image" || return 1
+	sudo sed -i -e "s/${basename}/${cname}-${bnum}/" "${cdir}/mnt/etc/hostname"
+	sudo sed -i -e "s/HWADDR=.*$/HWADDR=52:54:00${cbytes}:${bnum}/" "${cdir}/mnt/etc/sysconfig/network-scripts/ifcfg-eth0"
+	kvm_umount "${dstimg}" "${volgrp}" || die "Failed to mount image" || return 1
 }
 
 pinfo_detail() {
@@ -438,8 +524,8 @@ pinfo_detail() {
 		cdir="${CDIR} (does not exist)"
 	fi
 	local flavor="unknown"
-	if [ -f "${CDIR}/flavor" ]; then
-		flavor=$(cat "${CDIR}/flavor")
+	if [ -f "${CDIR}/config" ]; then
+		source "${CDIR}/config"
 	fi
 	echo "$@ cluster ${CNAME}:"
 	echo -e "\tFlavor: ${flavor}"
@@ -462,8 +548,8 @@ pinfo() {
 		cdir="${CDIR} (does not exist)"
 	fi
 	local flavor="unknown"
-	if [ -f "${CDIR}/flavor" ]; then
-		flavor=$(cat "${CDIR}/flavor")
+	if [ -f "${CDIR}/config" ]; then
+		source "${CDIR}/config"
 	fi
 	echo "$@ cluster ${CNAME}:"
 	echo -e "\tFlavor: ${flavor}"
@@ -478,20 +564,29 @@ cmd_exists() {
 }
 
 # Command functions
-cmd_create() {
-	if [ -d "${CDIR}" ]; then
-		die "cannot create cluster ${CNAME}: directory exists"
-	elif [ -n "${VIRSH_BOXES}" ]; then
-		die "cannot create cluster ${CNAME}: VMs exist"
-	elif [ -n "${VIRSH_NETR}" ]; then
-		die "cannot create cluster ${CNAME}: networks exist"
+cmd_reset() {
+	if [ ! -d "${CDIR}" ]; then
+		die "Cannot reset cluster ${CNAME}: directory does not exist"
+	elif [ -z "${VIRSH_BOXES}" ]; then
+		die "Cannot reset cluster ${CNAME}: No VMs exist"
 	elif [ ! -d "${IDIR}" ]; then
-		die "No image base directory ${IDIR}"
+		die "Cannot reset cluster ${CNAME}: No image base directory ${IDIR}"
+	elif [ ! -f "${CDIR}/config" ]; then
+		die "Cannot reset cluster ${CNAME}: No config"
 	fi
 
-	CBYTES=$(hexdump -n2 -e '/1 ":%02X"' /dev/urandom)
+	# Source env to get FLAVOR and CBYTES
+	source "${CDIR}/config"
+	if [ -z "${FLAVOR}" ]; then
+		die "Cannot reset cluster ${CNAME}: flavor not in config"
+	elif [ -z "${CBYTES}" ]; then
+		die "Cannot reset cluster ${CNAME}: CBYTES not in config"
+	fi
 
-	echo "Creating cluster ${CNAME}:"
+	local boxarr=( ${VIRSH_BOXES} )
+	NUMBOXES=${#boxarr[@]}
+
+	echo "Reseting cluster ${CNAME}:"
 	echo -e "\tDirectory: ${CDIR}"
 	echo -e "\tImage Directroy: ${IDIR}"
 	echo -e "\tFlavor: ${FLAVOR}"
@@ -500,51 +595,94 @@ cmd_create() {
 	echo -e "\tNumber of virtual block devices: ${NUMVBLOCKS}"
 	echo -e "\tMAC bytes: ${CBYTES}"
 
+	# Power them all down
+	for box in ${VIRSH_BOXES}; do
+		${VIRSH} destroy ${box} > /dev/null 2>&1
+	done
+
+
+	local basename="${FLAVOR}-base"
+	local volgrp=$(getvolgroup "${FLAVOR}")
+
+	for bnum in $(seq -f '%02.0f' ${NUMBOXES}); do
+		echo "Resetting box ${bnum}"
+		if [ -z "${NOROOT}" ]; then
+			sudo rm "${CDIR}/${CNAME}-box${bnum}.img"
+			create_image "${IDIR}/${FLAVOR}/box.img" "${CDIR}/${CNAME}-box${bnum}.img" "${volgrp}" "${basename}" "${CNAME}" "${bnum}" "${CBYTES}" || die "failed to mangle image"
+		fi
+		if [ -n "${RSETVBLOCK}" ]; then
+			for vblock in $(seq -f '%02.0f' ${NUMVBLOCKS}); do
+				sudo rm "${CDIR}/${CNAME}-box${bnum}-vblock${vblock}.img"
+				qemu-img create -f raw "${CDIR}/${CNAME}-box${bnum}-vblock${vblock}.img" "${VBLOCK_SIZE}"
+			done
+		fi
+	done
+}
+
+cmd_create() {
+	if [ -d "${CDIR}" ]; then
+		die "Cannot create cluster ${CNAME}: directory exists"
+	elif [ -n "${VIRSH_BOXES}" ]; then
+		die "Cannot create cluster ${CNAME}: VMs exist"
+	elif [ -n "${VIRSH_NETR}" ]; then
+		die "Cannot create cluster ${CNAME}: networks exist"
+	elif [ ! -d "${IDIR}" ]; then
+		die "Cannot create cluster ${CNAME}: No image base directory ${IDIR}"
+	fi
+
+	local cbytes=$(hexdump -n2 -e '/1 ":%02X"' /dev/urandom)
+
+	echo "Creating cluster ${CNAME}:"
+	echo -e "\tDirectory: ${CDIR}"
+	echo -e "\tImage Directroy: ${IDIR}"
+	echo -e "\tFlavor: ${FLAVOR}"
+	echo -e "\tNumber of boxes: ${NUMBOXES}"
+	echo -e "\tNumber of virtual block devices: ${NUMVBLOCKS}"
+	echo -e "\tMAC bytes: ${cbytes}"
+
 	local basename="${FLAVOR}-base"
 	local volgrp=$(getvolgroup "${FLAVOR}")
 
 	mkdir -p "${CDIR}" || die "failed to create ${CDIR}"
 
-	echo "${FLAVOR}" > "${CDIR}/flavor"
+	echo "FLAVOR=${FLAVOR}" > "${CDIR}/config"
+	echo "CBYTES=${cbytes}" >> "${CDIR}/config"
+	echo "NUMVBLOCKS=${NUMVBLOCKS}" >> "${CDIR}/config"
 
 	for net in $(seq -f '%02.0f' 1 ${NUMNETS}); do
 		NNAME="${CDIR}/${CNAME}-net${net}.xml"
-		cp "${IDIR}/${FLAVOR}/net-template.xml" "${NNAME}" || die "Failed to copy XML template for ${BNUM}"
+		cp "${IDIR}/${FLAVOR}/net-template.xml" "${NNAME}" || die "Failed to copy XML template for ${net}"
 		NETBYTE=$((${net} + 20))
-		sed -i -e "s#CLUSTERNAME#${CNAME}#" -e "s#NETNUM#${net}#" -e "s#NETBYTE#${NETBYTE}#" -e "s#CBYTES#${CBYTES}#" "${NNAME}"
+		sed -i -e "s#CLUSTERNAME#${CNAME}#" -e "s#NETNUM#${net}#" -e "s#NETBYTE#${NETBYTE}#" -e "s#CBYTES#${cbytes}#" "${NNAME}"
 
 		${VIRSH} net-define "${NNAME}" || die "Couldn't create ${NNAME}"
 		#${VIRSH} net-start "${CNAME}-n${net}" || die "Couldn't start ${CNAME}-n${net}"
 	done
 
-	for BNUM in $(seq -f '%02.0f' ${NUMBOXES}); do
-		cp --sparse=always "${IDIR}/${FLAVOR}/box.img" "${CDIR}/${CNAME}-box${BNUM}.img" || die "Failed to copy image"
-		kvm_mount "${CDIR}/${CNAME}-box${BNUM}.img" "${volgrp}" || die "Failed to mount image"
-		sudo sed -i -e "s/${basename}/${CNAME}-${BNUM}/" "${CDIR}/mnt/etc/hostname"
-		sudo sed -i -e "s/HWADDR=.*$/HWADDR=52:54:00${CBYTES}:${BNUM}/" "${CDIR}/mnt/etc/sysconfig/network-scripts/ifcfg-eth0"
-		kvm_umount "${CDIR}/${CNAME}-box${BNUM}.img" "${volgrp}" || die "Failed to mount image"
-		DNAME="${CDIR}/${CNAME}-box${BNUM}.xml"
-		cp "${IDIR}/${FLAVOR}/box-template.xml" "${DNAME}" || die "Failed to copy XML template for ${BNUM}"
+	for bnum in $(seq -f '%02.0f' ${NUMBOXES}); do
+		create_image "${IDIR}/${FLAVOR}/box.img" "${CDIR}/${CNAME}-box${bnum}.img" "${volgrp}" "${basename}" "${CNAME}" "${bnum}" "${cbytes}" || die "failed to mangle image"
+		DNAME="${CDIR}/${CNAME}-box${bnum}.xml"
+		cp "${IDIR}/${FLAVOR}/box-template.xml" "${DNAME}" || die "Failed to copy XML template for ${bnum}"
 
 		IFACES=""
 		for net in $(seq -f '%02.0f' ${NUMNETS}); do
 			SLOTNUM=$((${net} + 10))
-			NIFACE=$(sed -e "s#NETNUM#${net}#" -e "s#CLUSTERNAME#${CNAME}#" -e "s#BNUM#${BNUM}#" -e "s#SLOTNUM#${SLOTNUM}#" -e "s#CBYTES#${CBYTES}#" "${IDIR}/${FLAVOR}/iface-template.xml" | sed '{:q;N;s/\n/\\n/g;t q}')
+			NIFACE=$(sed -e "s#NETNUM#${net}#" -e "s#CLUSTERNAME#${CNAME}#" -e "s#BNUM#${bnum}#" -e "s#SLOTNUM#${SLOTNUM}#" -e "s#CBYTES#${cbytes}#" "${IDIR}/${FLAVOR}/iface-template.xml" | sed '{:q;N;s/\n/\\n/g;t q}')
 			IFACES+="${NIFACE}\n"
 		done
 
-		VBLOCKS=""
-		VDEV="a"
+		local vblocks=""
+		local vdev="a"
 		for vblock in $(seq -f '%02.0f' ${NUMVBLOCKS}); do
 			SLOTNUM=$((${vblock} + 20))
-			VDEV=$(echo "${VDEV}" | tr "a-z" "b-z")
-			NVBLOCK=$(sed -e "s#VNUM#${vblock}#" -e "s#CLUSTERNAME#${CNAME}#" -e "s#CDIR#$CDIR#" -e "s#BNUM#${BNUM}#" -e "s#SLOTNUM#${SLOTNUM}#" -e "s#VDEV#sd${VDEV}#" "${IDIR}/${FLAVOR}/vblock-template.xml" | sed '{:q;N;s/\n/\\n/g;t q}')
-			VBLOCKS+="${NVBLOCK}\n"
-			qemu-img create -f raw "${CDIR}/${CNAME}-box${BNUM}-vblock${vblock}.img" "${VBLOCK_SIZE}"
+			vdev=$(echo "${vdev}" | tr "a-z" "b-z")
+			NVBLOCK=$(sed -e "s#VNUM#${vblock}#" -e "s#CLUSTERNAME#${CNAME}#" -e "s#CDIR#$CDIR#" -e "s#BNUM#${bnum}#" -e "s#SLOTNUM#${SLOTNUM}#" -e "s#VDEV#sd${vdev}#" "${IDIR}/${FLAVOR}/vblock-template.xml" | sed '{:q;N;s/\n/\\n/g;t q}')
+			vblocks+="${NVBLOCK}\n"
+			qemu-img create -f raw "${CDIR}/${CNAME}-box${bnum}-vblock${vblock}.img" "${VBLOCK_SIZE}"
 		done
 
 		VMEM=$((${VMEMGB} * 1024 * 1024))
-		sed -i -e "s#CLUSTERNAME#${CNAME}#" -e "s#BNUM#${BNUM}#" -e "s#CDIR#$CDIR#" -e "s#CBYTES#${CBYTES}#" -e "s#IFACES#${IFACES}#" -e "s#VBLOCKS#${VBLOCKS}#" -e "s#VCPU#${VCPU}#" -e "s#VMEM#${VMEM}#" ${DNAME}
+		sed -i -e "s#CLUSTERNAME#${CNAME}#" -e "s#BNUM#${bnum}#" -e "s#CDIR#$CDIR#" -e "s#CBYTES#${cbytes}#" -e "s#IFACES#${IFACES}#" -e "s#VBLOCKS#${vblocks}#" -e "s#VCPU#${VCPU}#" -e "s#VMEM#${VMEM}#" ${DNAME}
 		${VIRSH} define "${DNAME}" || die "Couldn't define ${DNAME}"
 	done
 
@@ -721,6 +859,7 @@ case "${COMMAND}" in
 	"create")	cmd_create ;;
 	"delete")	cmd_delete ;;
 	"rename")	cmd_rename ;;
+	"reset")	cmd_reset ;;
 	"info")		cmd_info ;;
 	"boot")		cmd_boot ;;
 	"halt")		cmd_halt ;;
