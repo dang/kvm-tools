@@ -161,7 +161,7 @@ eval set -- "$ARGS"
 while true ; do
 	case "$1" in
 		-h|--help) usage; shift ;;
-		-V|--verbose) export GTWS_VERBOSE=yes; shift ;;
+		-V|--verbose) export GTWS_VERBOSE="yes"; shift ;;
 		-b|--base-directory) BASEDIR=$2 ; shift 2 ;;
 		-c|--cluster-directory) CDIR=$2 ; shift 2 ;;
 		--) shift ; break ;;
@@ -363,14 +363,15 @@ opts_boot() {
 
 opts_halt() {
 	local ME="${ME} ${COMMAND}"
-	local USAGE="[-h |--help] <cluster-name>"
+	local USAGE="[-h |--help] [-f |--force] <cluster-name>"
 	local LONGUSAGE="\t-h, --help\n\t\tPrint this help message
+\t-f | --force\n\t\tShut down paused boxes as well
 \t<cluster-name>\n\t\tName of cluster to halt
 
 \tHalt any boxes in a cluster that are running, and tear down private networks
 "
 	local SUBARGS=""
-	SUBARGS=`getopt -o h --long help -n "${ME}" -- "$@"`
+	SUBARGS=`getopt -o hf --long help,force -n "${ME}" -- "$@"`
 	if [ $? != 0 ] ; then
 		usage "invalid arguments"
 	fi
@@ -379,6 +380,7 @@ opts_halt() {
 	while true ; do
 		case "$1" in
 			-h|--help) usage; shift ;;
+			-f|--force) FORCE="true"; shift ;;
 			--) shift ; break ;;
 			* ) usage "Invalid argument $1" ;;
 		esac
@@ -809,6 +811,14 @@ cmd_halt() {
 			${VIRSH} shutdown ${box} || die "Failed to halt ${box}"
 		fi
 	done
+	if [ -n "${FORCE}" ]; then
+		echo "Force Halting"
+		for box in ${VIRSH_BOXES}; do
+			if [ "${BOX_STATE[${box}]}" == "paused" ]; then
+				${VIRSH} destroy ${box} || die "Failed to halt ${box}"
+			fi
+		done
+	fi
 	for net in ${VIRSH_NETS}; do
 		if [ "${NET_STATE[${net}]}" == "yes" ]; then
 			${VIRSH} net-destroy ${net} || die "Failed to stop ${net}"
@@ -829,12 +839,19 @@ VIRSH="virsh -c ${VURI}"
 #IFS=', ' read -a VIRSH_BOXES <<< "$string"
 VIRSH_BOXES=$(${VIRSH} list --all | egrep "\<${CNAME}-[0-9]" | awk '{printf "%s ", $2}')
 running=$(${VIRSH} list --state-running | egrep "\<${CNAME}-[0-9]" | awk '{printf "%s ", $2}')
+paused=$(${VIRSH} list --state-paused | egrep "\<${CNAME}-[0-9]" | awk '{printf "%s ", $2}')
 declare -A BOX_STATE
 for box in ${VIRSH_BOXES}; do
 	is_running="halted"
 	for run in ${running}; do
 		if [ "${run}" == "${box}" ]; then
 			is_running="running"
+			break
+		fi
+	done
+	for run in ${paused}; do
+		if [ "${run}" == "${box}" ]; then
+			is_running="paused"
 			break
 		fi
 	done
